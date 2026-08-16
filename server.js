@@ -527,9 +527,11 @@ async function strategy4_intercept_pix(email, password, valor, identificador) {
   }
 }
 
-// Rota principal - Serve o index.html da pasta public
+// ==========================================
+// ROTA PRINCIPAL - Deve vir ANTES das outras
+// ==========================================
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.send("Backend online! Sistema de PIX funcionando.");
 });
 
 // Health Check
