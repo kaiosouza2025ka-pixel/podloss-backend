@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const { chromium } = require("playwright");
-const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 
@@ -10,8 +9,6 @@ const app = express();
 // Middlewares
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-
-// Servir arquivos estáticos da pasta public
 app.use(express.static('public'));
 
 // Garantir diretório de screenshots
@@ -25,19 +22,21 @@ const state = {
   browser: null,
   context: null,
   page: null,
-  token: null,
   isLogged: false,
-  processing: false,
-  lastPixCode: null
+  processing: false
 };
 
 // Configurações
 const CONFIG = {
+  BASE_URL: 'https://y1c7m5s.com',
   LOGIN_URL: 'https://y1c7m5s.com/main/entrar',
+  HOME_URL: 'https://y1c7m5s.com/main/inicio',
   DEPOSIT_URL: 'https://y1c7m5s.com/main/deposito',
-  API_BASE: 'https://y1c7m5s.com/api',
-  HEADLESS: process.env.HEADLESS !== 'false',
-  TIMEOUT: 30000
+  HEADLESS: true,
+  TIMEOUT: 60000,
+  // Credenciais da plataforma (configure aqui)
+  PLATFORM_EMAIL: process.env.PLATFORM_EMAIL || "seu_email_aqui",
+  PLATFORM_PASSWORD: process.env.PLATFORM_PASSWORD || "sua_senha_aqui"
 };
 
 // Função para salvar screenshot
@@ -67,7 +66,6 @@ async function initBrowser() {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-accelerated-2d',
       '--disable-gpu',
       '--window-size=1920,1080'
     ]
@@ -80,61 +78,22 @@ async function initBrowser() {
   });
   
   state.page = await state.context.newPage();
-  
-  // Capturar respostas de rede
-  state.page.on('response', async (response) => {
-    try {
-      const url = response.url();
-      if (url.includes('token') || url.includes('auth') || url.includes('login') || 
-          url.includes('deposit') || url.includes('pix') || url.includes('payment')) {
-        const data = await response.json().catch(() => null);
-        if (data) {
-          if (data.token || data.access_token || data.jwt || data.sessionToken) {
-            state.token = data.token || data.access_token || data.jwt || data.sessionToken;
-          }
-          if (data.pixCode || data.qrCode || data.code || data.emv) {
-            state.lastPixCode = data.pixCode || data.qrCode || data.code || data.emv;
-          }
-        }
-      }
-    } catch (error) {
-      // Ignorar erros de parsing
-    }
-  });
-  
   return state.page;
 }
 
-// Estratégia 1: Interceptar API de autenticação
-async function strategy1_login(email, password) {
-  console.log('🎯 Estratégia 1: Interceptar API de autenticação');
+// Função para fazer login manual
+async function fazerLogin(email, senha) {
+  console.log('🔐 Fazendo login na plataforma...');
   
   try {
-    const page = await initBrowser();
-    const tokens = [];
+    const page = state.page;
     
-    page.on('response', async (response) => {
-      try {
-        const url = response.url();
-        if (url.includes('auth') || url.includes('login') || url.includes('session') || url.includes('token')) {
-          const data = await response.json().catch(() => null);
-          if (data) {
-            const token = data.token || data.access_token || data.jwt || data.sessionToken || data.accessToken;
-            if (token) {
-              tokens.push(token);
-              state.token = token;
-            }
-          }
-        }
-      } catch (error) {
-        // Ignorar
-      }
-    });
+    // Navegar para página de login
+    await page.goto(CONFIG.LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
+    await page.waitForTimeout(3000);
+    await saveScreenshot(page, '1_login_page');
     
-    await page.goto(CONFIG.LOGIN_URL, { waitUntil: 'networkidle', timeout: CONFIG.TIMEOUT });
-    await page.waitForTimeout(2000);
-    await saveScreenshot(page, 'login_page');
-    
+    // Procurar campos de email
     const emailSelectors = [
       'input[type="email"]',
       'input[name="email"]',
@@ -142,9 +101,41 @@ async function strategy1_login(email, password) {
       'input[placeholder*="e-mail" i]',
       'input[placeholder*="usuário" i]',
       'input[placeholder*="usuario" i]',
-      'input[formcontrolname="email"]'
+      'input[formcontrolname="email"]',
+      'ion-input input',
+      'input'
     ];
     
+    let emailInput = null;
+    for (const selector of emailSelectors) {
+      const inputs = await page.$$(selector);
+      for (const input of inputs) {
+        const type = await input.getAttribute('type');
+        const placeholder = await input.getAttribute('placeholder');
+        const name = await input.getAttribute('name');
+        
+        if (type === 'email' || 
+            (placeholder && (placeholder.toLowerCase().includes('email') || 
+                             placeholder.toLowerCase().includes('e-mail') || 
+                             placeholder.toLowerCase().includes('usuário') || 
+                             placeholder.toLowerCase().includes('usuario'))) ||
+            (name && name.toLowerCase().includes('email'))) {
+          emailInput = input;
+          break;
+        }
+      }
+      if (emailInput) break;
+    }
+    
+    // Se não achou por atributos, pegar primeiro input visível
+    if (!emailInput) {
+      const visibleInputs = await page.$$('input:visible');
+      if (visibleInputs.length > 0) {
+        emailInput = visibleInputs[0];
+      }
+    }
+    
+    // Procurar campo de senha
     const passwordSelectors = [
       'input[type="password"]',
       'input[name="password"]',
@@ -152,184 +143,199 @@ async function strategy1_login(email, password) {
       'input[formcontrolname="password"]'
     ];
     
-    let emailInput = null;
     let passwordInput = null;
-    
-    for (const selector of emailSelectors) {
-      emailInput = await page.$(selector);
-      if (emailInput) break;
-    }
-    
     for (const selector of passwordSelectors) {
       passwordInput = await page.$(selector);
       if (passwordInput) break;
     }
     
-    if (emailInput && passwordInput) {
-      await emailInput.fill(email);
-      await passwordInput.fill(password);
-      await page.waitForTimeout(1000);
-      
-      const submitSelectors = [
-        'button[type="submit"]',
-        'button:has-text("Entrar")',
-        'button:has-text("Login")',
-        'button:has-text("Acessar")',
-        'button:has-text("Continuar")',
-        'ion-button:has-text("Entrar")',
-        'ion-button:has-text("Login")'
-      ];
-      
-      let submitButton = null;
-      for (const selector of submitSelectors) {
-        submitButton = await page.$(selector);
-        if (submitButton) break;
-      }
-      
-      if (submitButton) {
-        await submitButton.click();
-        await page.waitForTimeout(5000);
-        await saveScreenshot(page, 'after_login_attempt');
+    // Se não achou, pegar segundo input visível
+    if (!passwordInput) {
+      const visibleInputs = await page.$$('input:visible');
+      if (visibleInputs.length > 1) {
+        passwordInput = visibleInputs[1];
       }
     }
     
-    if (tokens.length > 0) {
-      state.token = tokens[0];
-      state.isLogged = true;
-      return { success: true, token: tokens[0], strategy: 1 };
+    if (!emailInput || !passwordInput) {
+      console.error('❌ Campos de login não encontrados');
+      await saveScreenshot(page, 'erro_campos_login');
+      return { success: false, error: 'Campos de login não encontrados' };
     }
     
-    return { success: false, strategy: 1 };
-  } catch (error) {
-    console.error('❌ Erro na Estratégia 1:', error.message);
-    return { success: false, strategy: 1, error: error.message };
-  }
-}
-
-// Estratégia 2: Chamada direta à API
-async function strategy2_api_pix(email, password, valor, identificador) {
-  console.log('🎯 Estratégia 2: Chamada direta à API');
-  
-  try {
-    if (!state.token) {
-      const loginEndpoints = [
-        `${CONFIG.API_BASE}/auth/login`,
-        `${CONFIG.API_BASE}/login`,
-        `${CONFIG.API_BASE}/session`,
-        `${CONFIG.API_BASE}/auth`
-      ];
-      
-      for (const endpoint of loginEndpoints) {
-        try {
-          const loginResponse = await axios.post(endpoint, {
-            email,
-            password
-          }, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 10000
-          });
-          
-          if (loginResponse.data) {
-            state.token = loginResponse.data.token || 
-                         loginResponse.data.access_token || 
-                         loginResponse.data.jwt || 
-                         loginResponse.data.sessionToken;
-            
-            if (state.token) break;
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-    }
+    // Preencher credenciais
+    await emailInput.click();
+    await page.waitForTimeout(500);
+    await emailInput.fill(email);
+    await page.waitForTimeout(500);
     
-    if (!state.token) {
-      return { success: false, strategy: 2, error: 'Token não disponível' };
-    }
+    await passwordInput.click();
+    await page.waitForTimeout(500);
+    await passwordInput.fill(senha);
+    await page.waitForTimeout(1000);
     
-    const headers = {
-      'Authorization': `Bearer ${state.token}`,
-      'Content-Type': 'application/json'
-    };
+    await saveScreenshot(page, '2_credenciais_preenchidas');
     
-    const depositEndpoints = [
-      `${CONFIG.API_BASE}/deposit/pix`,
-      `${CONFIG.API_BASE}/pix/generate`,
-      `${CONFIG.API_BASE}/deposit`,
-      `${CONFIG.API_BASE}/payment/pix`
+    // Procurar botão de login
+    const buttonSelectors = [
+      'button[type="submit"]',
+      'button:has-text("Entrar")',
+      'button:has-text("Login")',
+      'button:has-text("Acessar")',
+      'button:has-text("Continuar")',
+      'ion-button:has-text("Entrar")',
+      'ion-button:has-text("Login")',
+      'button'
     ];
     
-    for (const endpoint of depositEndpoints) {
-      try {
-        const pixResponse = await axios.post(endpoint, {
-          amount: valor,
-          value: valor,
-          valor: valor,
-          cpf: identificador,
-          identifier: identificador
-        }, { 
-          headers,
-          timeout: 15000
-        });
-        
-        if (pixResponse.data) {
-          const pixCode = pixResponse.data.pixCode || 
-                         pixResponse.data.qrCode || 
-                         pixResponse.data.code || 
-                         pixResponse.data.pix ||
-                         pixResponse.data.emv;
-          
-          if (pixCode) {
-            state.lastPixCode = pixCode;
-            return { success: true, pixCode, strategy: 2 };
-          }
+    let loginButton = null;
+    for (const selector of buttonSelectors) {
+      const buttons = await page.$$(selector);
+      for (const button of buttons) {
+        const text = await button.innerText().catch(() => '');
+        if (text && (text.includes('Entrar') || text.includes('Login') || 
+                     text.includes('Acessar') || text.includes('Continuar'))) {
+          loginButton = button;
+          break;
         }
-      } catch (error) {
-        continue;
+      }
+      if (loginButton) break;
+    }
+    
+    if (!loginButton) {
+      console.error('❌ Botão de login não encontrado');
+      await saveScreenshot(page, 'erro_botao_login');
+      
+      // Tentar pressionar Enter
+      await passwordInput.press('Enter');
+      await page.waitForTimeout(5000);
+    } else {
+      await loginButton.click();
+      await page.waitForTimeout(8000);
+    }
+    
+    await saveScreenshot(page, '3_apos_login');
+    
+    // Verificar se login foi bem sucedido
+    const currentUrl = page.url();
+    console.log('📍 URL após login:', currentUrl);
+    
+    if (currentUrl.includes('entrar') || currentUrl.includes('login')) {
+      // Pode ter falhado ou estar carregando
+      await page.waitForTimeout(5000);
+      const newUrl = page.url();
+      
+      if (newUrl.includes('entrar') || newUrl.includes('login')) {
+        console.error('❌ Login falhou - continua na página de login');
+        return { success: false, error: 'Login falhou' };
       }
     }
     
-    return { success: false, strategy: 2 };
+    state.isLogged = true;
+    console.log('✅ Login realizado com sucesso!');
+    return { success: true };
+    
   } catch (error) {
-    console.error('❌ Erro na Estratégia 2:', error.message);
-    return { success: false, strategy: 2, error: error.message };
+    console.error('❌ Erro no login:', error.message);
+    await saveScreenshot(state.page, 'erro_login');
+    return { success: false, error: error.message };
   }
 }
 
-// Estratégia 3: UI completa
-async function strategy3_ui_pix(email, password, valor, identificador) {
-  console.log('🎯 Estratégia 3: UI completa');
+// Função para navegar até depósito
+async function navegarParaDeposito() {
+  console.log('💰 Navegando para página de depósito...');
   
   try {
-    if (!state.page || !state.isLogged) {
-      await strategy1_login(email, password);
-    }
-    
     const page = state.page;
     
-    await page.goto(CONFIG.DEPOSIT_URL, { waitUntil: 'networkidle', timeout: CONFIG.TIMEOUT });
-    await page.waitForTimeout(3000);
-    await saveScreenshot(page, 'deposit_page');
+    // Tentar URL direta
+    await page.goto(CONFIG.DEPOSIT_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
+    await page.waitForTimeout(5000);
+    await saveScreenshot(page, '4_pagina_deposito');
     
+    // Se a URL direta não funcionou, procurar link de depósito
+    const currentUrl = page.url();
+    if (currentUrl.includes('entrar') || currentUrl.includes('login')) {
+      console.log('⚠️ Precisando navegar manualmente para depósito');
+      
+      // Voltar para home
+      await page.goto(CONFIG.HOME_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
+      await page.waitForTimeout(3000);
+      
+      // Procurar link de depósito
+      const depositLinks = await page.$$('a:has-text("Depósito"), a:has-text("Deposito"), a:has-text("deposito"), a:has-text("depósito"), button:has-text("Depósito"), ion-button:has-text("Depósito")');
+      
+      for (const link of depositLinks) {
+        const href = await link.getAttribute('href');
+        if (href && href.includes('deposit')) {
+          await link.click();
+          await page.waitForTimeout(5000);
+          break;
+        }
+      }
+    }
+    
+    await saveScreenshot(page, '5_deposito_final');
+    return { success: true };
+    
+  } catch (error) {
+    console.error('❌ Erro ao navegar para depósito:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// Função para selecionar PIX
+async function selecionarPIX() {
+  console.log('💳 Selecionando método PIX...');
+  
+  try {
+    const page = state.page;
+    
+    // Procurar botão PIX
     const pixSelectors = [
       'button:has-text("PIX")',
       'button:has-text("Pix")',
       'div:has-text("PIX")',
-      'ion-segment-button:has-text("PIX")',
+      'span:has-text("PIX")',
       'ion-button:has-text("PIX")',
+      'ion-segment-button:has-text("PIX")',
       '[value="pix"]',
-      'input[value="pix"]'
+      'img[alt*="PIX" i]',
+      'img[src*="pix" i]'
     ];
     
+    let pixButton = null;
     for (const selector of pixSelectors) {
-      const pixButton = await page.$(selector);
+      pixButton = await page.$(selector);
       if (pixButton) {
         await pixButton.click();
-        await page.waitForTimeout(2000);
-        break;
+        await page.waitForTimeout(3000);
+        await saveScreenshot(page, '6_pix_selecionado');
+        console.log('✅ PIX selecionado');
+        return { success: true };
       }
     }
     
+    // Se não achou botão específico, verificar se PIX já está selecionado
+    console.log('⚠️ Botão PIX não encontrado, verificando se já está selecionado');
+    await saveScreenshot(page, '6_sem_botao_pix');
+    return { success: true }; // Continuar mesmo sem clicar
+    
+  } catch (error) {
+    console.error('❌ Erro ao selecionar PIX:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// Função para preencher valor
+async function preencherValor(valor) {
+  console.log(`💵 Preenchendo valor: R$ ${valor}`);
+  
+  try {
+    const page = state.page;
+    
+    // Procurar campo de valor
     const amountSelectors = [
       'input[type="number"]',
       'input[name="amount"]',
@@ -337,199 +343,259 @@ async function strategy3_ui_pix(email, password, valor, identificador) {
       'input[name="value"]',
       'input[placeholder*="valor" i]',
       'input[placeholder*="value" i]',
-      'input[placeholder*="amount" i]'
+      'input[placeholder*="amount" i]',
+      'input[placeholder*="R$" i]',
+      'input[inputmode="numeric"]',
+      'ion-input input'
     ];
     
+    let amountInput = null;
     for (const selector of amountSelectors) {
-      const amountInput = await page.$(selector);
-      if (amountInput) {
-        await amountInput.fill(valor.toString());
-        await page.waitForTimeout(1000);
-        break;
-      }
-    }
-    
-    if (identificador) {
-      const cpfSelectors = [
-        'input[name="cpf"]',
-        'input[placeholder*="CPF" i]',
-        'input[placeholder*="cpf" i]',
-        'input[placeholder*="identificador" i]'
-      ];
-      
-      for (const selector of cpfSelectors) {
-        const cpfInput = await page.$(selector);
-        if (cpfInput) {
-          await cpfInput.fill(identificador);
-          await page.waitForTimeout(1000);
+      const inputs = await page.$$(selector);
+      for (const input of inputs) {
+        const placeholder = await input.getAttribute('placeholder');
+        const name = await input.getAttribute('name');
+        const type = await input.getAttribute('type');
+        
+        if (type === 'number' || 
+            (placeholder && (placeholder.toLowerCase().includes('valor') || 
+                             placeholder.toLowerCase().includes('value') || 
+                             placeholder.toLowerCase().includes('amount') || 
+                             placeholder.includes('R$'))) ||
+            (name && (name.toLowerCase().includes('valor') || 
+                      name.toLowerCase().includes('value') || 
+                      name.toLowerCase().includes('amount')))) {
+          amountInput = input;
           break;
         }
       }
+      if (amountInput) break;
     }
     
+    if (!amountInput) {
+      console.error('❌ Campo de valor não encontrado');
+      await saveScreenshot(page, 'erro_campo_valor');
+      return { success: false, error: 'Campo de valor não encontrado' };
+    }
+    
+    // Limpar campo e preencher
+    await amountInput.click();
+    await page.waitForTimeout(500);
+    await amountInput.fill('');
+    await page.waitForTimeout(500);
+    await amountInput.type(valor.toString());
+    await page.waitForTimeout(2000);
+    
+    await saveScreenshot(page, '7_valor_preenchido');
+    console.log('✅ Valor preenchido');
+    return { success: true };
+    
+  } catch (error) {
+    console.error('❌ Erro ao preencher valor:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// Função para gerar PIX
+async function gerarPIX() {
+  console.log('🎯 Gerando PIX...');
+  
+  try {
+    const page = state.page;
+    
+    // Procurar botão de gerar
     const generateSelectors = [
       'button:has-text("Gerar")',
+      'button:has-text("Gerar PIX")',
       'button:has-text("Continuar")',
       'button:has-text("Confirmar")',
-      'button:has-text("Gerar PIX")',
+      'button:has-text("Depositar")',
       'button[type="submit"]',
       'ion-button:has-text("Gerar")',
-      'ion-button:has-text("Continuar")'
+      'ion-button:has-text("Continuar")',
+      'ion-button:has-text("Confirmar")'
     ];
     
+    let generateButton = null;
     for (const selector of generateSelectors) {
-      const generateButton = await page.$(selector);
+      generateButton = await page.$(selector);
       if (generateButton) {
         await generateButton.click();
-        await page.waitForTimeout(5000);
-        await saveScreenshot(page, 'after_generate');
-        break;
+        await page.waitForTimeout(8000);
+        await saveScreenshot(page, '8_pix_gerado');
+        console.log('✅ Botão de gerar clicado');
+        return { success: true };
       }
     }
     
+    console.error('❌ Botão de gerar não encontrado');
+    await saveScreenshot(page, 'erro_botao_gerar');
+    return { success: false, error: 'Botão de gerar não encontrado' };
+    
+  } catch (error) {
+    console.error('❌ Erro ao gerar PIX:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// Função para extrair código PIX
+async function extrairCodigoPIX() {
+  console.log('🔍 Extraindo código PIX...');
+  
+  try {
+    const page = state.page;
+    
+    // Esperar mais um pouco para o PIX carregar
+    await page.waitForTimeout(5000);
+    await saveScreenshot(page, '9_extraindo_pix');
+    
+    // Buscar código PIX em todo o DOM
     const pixCode = await page.evaluate(() => {
+      // Padrões comuns de código PIX
       const patterns = [
-        /00020126\d{20,}/,
-        /[0-9]{32,}/,
-        /[A-Z0-9]{32,}/
+        /00020126\d{20,}/,           // Padrão EMV completo
+        /000201[0-9]{20,}/,          // Padrão EMV
+        /[0-9]{32,}/,                // Números longos
+        /[A-Z0-9]{32,}/              // Alphanuméricos longos
       ];
       
-      const textContent = document.body.innerText;
+      // Buscar em todo o texto da página
+      const allText = document.body.innerText;
       
       for (const pattern of patterns) {
-        const matches = textContent.match(pattern);
-        if (matches && matches[0]) return matches[0];
+        const matches = allText.match(pattern);
+        if (matches && matches[0]) {
+          return matches[0];
+        }
       }
       
-      const codeElements = document.querySelectorAll('[class*="pix"], [class*="qr"], [id*="pix"], [id*="qr"]');
+      // Buscar em inputs e textareas
+      const inputs = document.querySelectorAll('input, textarea');
+      for (const input of inputs) {
+        const value = input.value || '';
+        if (value.length > 30) {
+          return value;
+        }
+      }
+      
+      // Buscar em elementos com classes específicas
+      const codeElements = document.querySelectorAll('[class*="pix"], [class*="qr"], [class*="code"], [id*="pix"], [id*="qr"], [id*="code"]');
       for (const el of codeElements) {
         const text = el.textContent || el.value || '';
-        if (text.length > 20) return text;
+        if (text.length > 30) {
+          return text;
+        }
+      }
+      
+      // Buscar QR Code (canvas ou img)
+      const qrImages = document.querySelectorAll('img[src*="qr"], canvas, img[alt*="qr" i], img[alt*="pix" i]');
+      if (qrImages.length > 0) {
+        // Se tem QR code, pegar o src
+        const qrSrc = qrImages[0].src || '';
+        if (qrSrc.length > 0) {
+          return qrSrc;
+        }
       }
       
       return null;
     });
     
+    // Buscar em shadow DOM
     if (!pixCode) {
       const shadowPix = await page.evaluate(() => {
         const elements = document.querySelectorAll('*');
         for (let el of elements) {
           if (el.shadowRoot) {
             const text = el.shadowRoot.textContent;
-            const matches = text.match(/(?:00020126\d{20,}|[0-9]{32,}|[A-Z0-9]{32,})/g);
-            if (matches && matches[0]) return matches[0];
+            const matches = text.match(/(?:00020126\d{20,}|000201[0-9]{20,}|[0-9]{32,}|[A-Z0-9]{32,})/g);
+            if (matches && matches[0]) {
+              return matches[0];
+            }
           }
         }
         return null;
       });
       
       if (shadowPix) {
-        state.lastPixCode = shadowPix;
-        return { success: true, pixCode: shadowPix, strategy: 3 };
+        console.log('✅ Código PIX encontrado no shadow DOM');
+        return { success: true, pixCode: shadowPix };
       }
     }
     
     if (pixCode) {
-      state.lastPixCode = pixCode;
-      return { success: true, pixCode, strategy: 3 };
+      console.log('✅ Código PIX encontrado!');
+      console.log('📋 Código:', pixCode.substring(0, 50) + '...');
+      return { success: true, pixCode };
     }
     
-    return { success: false, strategy: 3 };
+    console.error('❌ Código PIX não encontrado');
+    await saveScreenshot(page, '10_pix_nao_encontrado');
+    return { success: false, error: 'Código PIX não encontrado' };
+    
   } catch (error) {
-    console.error('❌ Erro na Estratégia 3:', error.message);
-    return { success: false, strategy: 3, error: error.message };
+    console.error('❌ Erro ao extrair código PIX:', error.message);
+    return { success: false, error: error.message };
   }
 }
 
-// Estratégia 4: Interceptar resposta da API de depósito
-async function strategy4_intercept_pix(email, password, valor, identificador) {
-  console.log('🎯 Estratégia 4: Interceptar resposta da API de depósito');
+// Função principal para gerar depósito PIX
+async function gerarDepositoPIX(valor) {
+  console.log(`\n🚀 INICIANDO GERAÇÃO DE PIX - Valor: R$ ${valor}\n`);
   
   try {
-    if (!state.page) {
-      await strategy1_login(email, password);
+    // 1. Inicializar browser
+    await initBrowser();
+    
+    // 2. Fazer login
+    const loginResult = await fazerLogin(CONFIG.PLATFORM_EMAIL, CONFIG.PLATFORM_PASSWORD);
+    if (!loginResult.success) {
+      return loginResult;
     }
     
-    const page = state.page;
-    const pixCodes = [];
-    
-    const responseHandler = async (response) => {
-      try {
-        const url = response.url();
-        if (url.includes('deposit') || url.includes('pix') || url.includes('payment')) {
-          const data = await response.json().catch(() => null);
-          if (data) {
-            const pixCode = data.pixCode || data.qrCode || data.code || data.pix || data.emv;
-            if (pixCode) {
-              pixCodes.push(pixCode);
-              state.lastPixCode = pixCode;
-            }
-          }
-        }
-      } catch (error) {
-        // Ignorar
-      }
-    };
-    
-    page.on('response', responseHandler);
-    
-    const depositResult = await page.evaluate(async ({ valor, identificador }) => {
-      const endpoints = [
-        '/api/deposit/pix',
-        '/api/pix/generate',
-        '/api/deposit',
-        '/api/payment/pix',
-        '/deposit/pix'
-      ];
-      
-      for (const endpoint of endpoints) {
-        try {
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              amount: valor, 
-              value: valor,
-              valor: valor,
-              cpf: identificador,
-              identifier: identificador
-            })
-          });
-          
-          if (response.ok) {
-            return await response.json();
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-      
-      return null;
-    }, { valor, identificador });
-    
-    if (depositResult && (depositResult.pixCode || depositResult.qrCode || depositResult.code)) {
-      const pixCode = depositResult.pixCode || depositResult.qrCode || depositResult.code;
-      state.lastPixCode = pixCode;
-      return { success: true, pixCode, strategy: 4 };
+    // 3. Navegar para depósito
+    const navResult = await navegarParaDeposito();
+    if (!navResult.success) {
+      return navResult;
     }
     
-    await page.waitForTimeout(5000);
-    
-    if (pixCodes.length > 0) {
-      state.lastPixCode = pixCodes[0];
-      return { success: true, pixCode: pixCodes[0], strategy: 4 };
+    // 4. Selecionar PIX
+    const pixResult = await selecionarPIX();
+    if (!pixResult.success) {
+      return pixResult;
     }
     
-    return { success: false, strategy: 4 };
+    // 5. Preencher valor
+    const valorResult = await preencherValor(valor);
+    if (!valorResult.success) {
+      return valorResult;
+    }
+    
+    // 6. Gerar PIX
+    const gerarResult = await gerarPIX();
+    if (!gerarResult.success) {
+      return gerarResult;
+    }
+    
+    // 7. Extrair código PIX
+    const codigoResult = await extrairCodigoPIX();
+    if (codigoResult.success) {
+      return {
+        success: true,
+        pixCode: codigoResult.pixCode,
+        valor: valor,
+        message: 'PIX gerado com sucesso!'
+      };
+    }
+    
+    return codigoResult;
+    
   } catch (error) {
-    console.error('❌ Erro na Estratégia 4:', error.message);
-    return { success: false, strategy: 4, error: error.message };
+    console.error('❌ Erro geral:', error.message);
+    return { success: false, error: error.message };
   }
 }
 
-// ==========================================
-// ROTA PRINCIPAL - Deve vir ANTES das outras
-// ==========================================
+// Rota principal
 app.get("/", (req, res) => {
   res.send("Backend online! Sistema de PIX funcionando.");
 });
@@ -574,9 +640,7 @@ app.post("/deposito", async (req, res) => {
       quantidade,
       identificador,
       cliente,
-      telefone,
-      email,
-      senha
+      telefone
     } = req.body;
 
     console.log("💰 Nova solicitação de PIX:");
@@ -587,24 +651,13 @@ app.post("/deposito", async (req, res) => {
       quantidade,
       identificador,
       cliente,
-      telefone,
-      email: email || 'não fornecido',
-      senha: senha ? '***' : 'não fornecida'
+      telefone
     });
 
     if (!valor) {
       return res.status(400).json({
         status: "erro",
         message: "Valor é obrigatório"
-      });
-    }
-
-    if (!email || !senha) {
-      console.log("⚠️ Email/senha não fornecidos. Retornando PIX simulado.");
-      return res.status(200).json({
-        status: "ok",
-        pix_code: "PIX_SIMULADO_" + Date.now(),
-        message: "PIX simulado (forneça email/senha para PIX real)"
       });
     }
 
@@ -617,69 +670,26 @@ app.post("/deposito", async (req, res) => {
 
     state.processing = true;
 
-    try {
-      const result1 = await strategy1_login(email, senha);
-      console.log('📊 Estratégia 1:', result1.success ? '✅ Sucesso' : '❌ Falhou');
+    const resultado = await gerarDepositoPIX(valor);
+    
+    state.processing = false;
 
-      const result2 = await strategy2_api_pix(email, senha, valor, identificador);
-      if (result2.success) {
-        state.processing = false;
-        return res.status(200).json({
-          status: "ok",
-          pix_code: result2.pixCode,
-          strategy: "API Direta",
-          message: "PIX gerado com sucesso via API"
-        });
-      }
-      console.log('📊 Estratégia 2: ❌ Falhou');
-
-      const result3 = await strategy3_ui_pix(email, senha, valor, identificador);
-      if (result3.success) {
-        state.processing = false;
-        return res.status(200).json({
-          status: "ok",
-          pix_code: result3.pixCode,
-          strategy: "UI Automatizada",
-          message: "PIX gerado com sucesso via interface"
-        });
-      }
-      console.log('📊 Estratégia 3: ❌ Falhou');
-
-      const result4 = await strategy4_intercept_pix(email, senha, valor, identificador);
-      if (result4.success) {
-        state.processing = false;
-        return res.status(200).json({
-          status: "ok",
-          pix_code: result4.pixCode,
-          strategy: "Interceptação",
-          message: "PIX gerado com sucesso via interceptação"
-        });
-      }
-      console.log('📊 Estratégia 4: ❌ Falhou');
-
-      state.processing = false;
-      return res.status(500).json({
-        status: "erro",
-        message: "Não foi possível gerar o PIX. Todas as estratégias falharam.",
-        details: {
-          estrategia1: result1.error || "Falhou",
-          estrategia2: result2.error || "Falhou",
-          estrategia3: result3.error || "Falhou",
-          estrategia4: result4.error || "Falhou"
-        }
+    if (resultado.success) {
+      return res.status(200).json({
+        status: "ok",
+        pix_code: resultado.pixCode,
+        valor: valor,
+        message: "PIX gerado com sucesso!"
       });
-
-    } catch (error) {
-      state.processing = false;
-      console.error("❌ Erro geral:", error);
+    } else {
       return res.status(500).json({
         status: "erro",
-        message: "Erro interno ao gerar PIX",
-        error: error.message
+        message: resultado.error || "Não foi possível gerar o PIX"
       });
     }
 
   } catch (error) {
+    state.processing = false;
     console.error(error);
     return res.status(500).json({
       status: "erro",
@@ -695,4 +705,7 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔍 Debug screenshots: http://localhost:${PORT}/debug-screenshots`);
+  console.log(`\n⚠️  IMPORTANTE: Configure as credenciais da plataforma no Railway:`);
+  console.log(`    PLATFORM_EMAIL = seu_email_da_plataforma`);
+  console.log(`    PLATFORM_PASSWORD = sua_senha_da_plataforma`);
 });
