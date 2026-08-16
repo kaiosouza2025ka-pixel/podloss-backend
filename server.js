@@ -34,9 +34,8 @@ const CONFIG = {
   DEPOSIT_URL: 'https://y1c7m5s.com/main/deposito',
   HEADLESS: true,
   TIMEOUT: 60000,
-  // Credenciais da plataforma (configure aqui)
-  PLATFORM_EMAIL: process.env.PLATFORM_EMAIL || "seu_email_aqui",
-  PLATFORM_PASSWORD: process.env.PLATFORM_PASSWORD || "sua_senha_aqui"
+  PLATFORM_EMAIL: process.env.PLATFORM_EMAIL || "",
+  PLATFORM_PASSWORD: process.env.PLATFORM_PASSWORD || ""
 };
 
 // Função para salvar screenshot
@@ -88,12 +87,10 @@ async function fazerLogin(email, senha) {
   try {
     const page = state.page;
     
-    // Navegar para página de login
     await page.goto(CONFIG.LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
     await page.waitForTimeout(3000);
     await saveScreenshot(page, '1_login_page');
     
-    // Procurar campos de email
     const emailSelectors = [
       'input[type="email"]',
       'input[name="email"]',
@@ -102,7 +99,6 @@ async function fazerLogin(email, senha) {
       'input[placeholder*="usuário" i]',
       'input[placeholder*="usuario" i]',
       'input[formcontrolname="email"]',
-      'ion-input input',
       'input'
     ];
     
@@ -127,7 +123,6 @@ async function fazerLogin(email, senha) {
       if (emailInput) break;
     }
     
-    // Se não achou por atributos, pegar primeiro input visível
     if (!emailInput) {
       const visibleInputs = await page.$$('input:visible');
       if (visibleInputs.length > 0) {
@@ -135,7 +130,6 @@ async function fazerLogin(email, senha) {
       }
     }
     
-    // Procurar campo de senha
     const passwordSelectors = [
       'input[type="password"]',
       'input[name="password"]',
@@ -149,7 +143,6 @@ async function fazerLogin(email, senha) {
       if (passwordInput) break;
     }
     
-    // Se não achou, pegar segundo input visível
     if (!passwordInput) {
       const visibleInputs = await page.$$('input:visible');
       if (visibleInputs.length > 1) {
@@ -163,7 +156,6 @@ async function fazerLogin(email, senha) {
       return { success: false, error: 'Campos de login não encontrados' };
     }
     
-    // Preencher credenciais
     await emailInput.click();
     await page.waitForTimeout(500);
     await emailInput.fill(email);
@@ -176,7 +168,6 @@ async function fazerLogin(email, senha) {
     
     await saveScreenshot(page, '2_credenciais_preenchidas');
     
-    // Procurar botão de login
     const buttonSelectors = [
       'button[type="submit"]',
       'button:has-text("Entrar")',
@@ -205,8 +196,6 @@ async function fazerLogin(email, senha) {
     if (!loginButton) {
       console.error('❌ Botão de login não encontrado');
       await saveScreenshot(page, 'erro_botao_login');
-      
-      // Tentar pressionar Enter
       await passwordInput.press('Enter');
       await page.waitForTimeout(5000);
     } else {
@@ -216,12 +205,10 @@ async function fazerLogin(email, senha) {
     
     await saveScreenshot(page, '3_apos_login');
     
-    // Verificar se login foi bem sucedido
     const currentUrl = page.url();
     console.log('📍 URL após login:', currentUrl);
     
     if (currentUrl.includes('entrar') || currentUrl.includes('login')) {
-      // Pode ter falhado ou estar carregando
       await page.waitForTimeout(5000);
       const newUrl = page.url();
       
@@ -249,21 +236,17 @@ async function navegarParaDeposito() {
   try {
     const page = state.page;
     
-    // Tentar URL direta
     await page.goto(CONFIG.DEPOSIT_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
     await page.waitForTimeout(5000);
     await saveScreenshot(page, '4_pagina_deposito');
     
-    // Se a URL direta não funcionou, procurar link de depósito
     const currentUrl = page.url();
     if (currentUrl.includes('entrar') || currentUrl.includes('login')) {
       console.log('⚠️ Precisando navegar manualmente para depósito');
       
-      // Voltar para home
       await page.goto(CONFIG.HOME_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
       await page.waitForTimeout(3000);
       
-      // Procurar link de depósito
       const depositLinks = await page.$$('a:has-text("Depósito"), a:has-text("Deposito"), a:has-text("deposito"), a:has-text("depósito"), button:has-text("Depósito"), ion-button:has-text("Depósito")');
       
       for (const link of depositLinks) {
@@ -292,7 +275,6 @@ async function selecionarPIX() {
   try {
     const page = state.page;
     
-    // Procurar botão PIX
     const pixSelectors = [
       'button:has-text("PIX")',
       'button:has-text("Pix")',
@@ -317,10 +299,9 @@ async function selecionarPIX() {
       }
     }
     
-    // Se não achou botão específico, verificar se PIX já está selecionado
     console.log('⚠️ Botão PIX não encontrado, verificando se já está selecionado');
     await saveScreenshot(page, '6_sem_botao_pix');
-    return { success: true }; // Continuar mesmo sem clicar
+    return { success: true };
     
   } catch (error) {
     console.error('❌ Erro ao selecionar PIX:', error.message);
@@ -335,7 +316,6 @@ async function preencherValor(valor) {
   try {
     const page = state.page;
     
-    // Procurar campo de valor
     const amountSelectors = [
       'input[type="number"]',
       'input[name="amount"]',
@@ -378,7 +358,6 @@ async function preencherValor(valor) {
       return { success: false, error: 'Campo de valor não encontrado' };
     }
     
-    // Limpar campo e preencher
     await amountInput.click();
     await page.waitForTimeout(500);
     await amountInput.fill('');
@@ -403,7 +382,6 @@ async function gerarPIX() {
   try {
     const page = state.page;
     
-    // Procurar botão de gerar
     const generateSelectors = [
       'button:has-text("Gerar")',
       'button:has-text("Gerar PIX")',
@@ -445,21 +423,17 @@ async function extrairCodigoPIX() {
   try {
     const page = state.page;
     
-    // Esperar mais um pouco para o PIX carregar
     await page.waitForTimeout(5000);
     await saveScreenshot(page, '9_extraindo_pix');
     
-    // Buscar código PIX em todo o DOM
     const pixCode = await page.evaluate(() => {
-      // Padrões comuns de código PIX
       const patterns = [
-        /00020126\d{20,}/,           // Padrão EMV completo
-        /000201[0-9]{20,}/,          // Padrão EMV
-        /[0-9]{32,}/,                // Números longos
-        /[A-Z0-9]{32,}/              // Alphanuméricos longos
+        /00020126\d{20,}/,
+        /000201[0-9]{20,}/,
+        /[0-9]{32,}/,
+        /[A-Z0-9]{32,}/
       ];
       
-      // Buscar em todo o texto da página
       const allText = document.body.innerText;
       
       for (const pattern of patterns) {
@@ -469,7 +443,6 @@ async function extrairCodigoPIX() {
         }
       }
       
-      // Buscar em inputs e textareas
       const inputs = document.querySelectorAll('input, textarea');
       for (const input of inputs) {
         const value = input.value || '';
@@ -478,7 +451,6 @@ async function extrairCodigoPIX() {
         }
       }
       
-      // Buscar em elementos com classes específicas
       const codeElements = document.querySelectorAll('[class*="pix"], [class*="qr"], [class*="code"], [id*="pix"], [id*="qr"], [id*="code"]');
       for (const el of codeElements) {
         const text = el.textContent || el.value || '';
@@ -487,10 +459,8 @@ async function extrairCodigoPIX() {
         }
       }
       
-      // Buscar QR Code (canvas ou img)
       const qrImages = document.querySelectorAll('img[src*="qr"], canvas, img[alt*="qr" i], img[alt*="pix" i]');
       if (qrImages.length > 0) {
-        // Se tem QR code, pegar o src
         const qrSrc = qrImages[0].src || '';
         if (qrSrc.length > 0) {
           return qrSrc;
@@ -500,7 +470,6 @@ async function extrairCodigoPIX() {
       return null;
     });
     
-    // Buscar em shadow DOM
     if (!pixCode) {
       const shadowPix = await page.evaluate(() => {
         const elements = document.querySelectorAll('*');
@@ -543,40 +512,33 @@ async function gerarDepositoPIX(valor) {
   console.log(`\n🚀 INICIANDO GERAÇÃO DE PIX - Valor: R$ ${valor}\n`);
   
   try {
-    // 1. Inicializar browser
     await initBrowser();
     
-    // 2. Fazer login
     const loginResult = await fazerLogin(CONFIG.PLATFORM_EMAIL, CONFIG.PLATFORM_PASSWORD);
     if (!loginResult.success) {
       return loginResult;
     }
     
-    // 3. Navegar para depósito
     const navResult = await navegarParaDeposito();
     if (!navResult.success) {
       return navResult;
     }
     
-    // 4. Selecionar PIX
     const pixResult = await selecionarPIX();
     if (!pixResult.success) {
       return pixResult;
     }
     
-    // 5. Preencher valor
     const valorResult = await preencherValor(valor);
     if (!valorResult.success) {
       return valorResult;
     }
     
-    // 6. Gerar PIX
     const gerarResult = await gerarPIX();
     if (!gerarResult.success) {
       return gerarResult;
     }
     
-    // 7. Extrair código PIX
     const codigoResult = await extrairCodigoPIX();
     if (codigoResult.success) {
       return {
@@ -595,9 +557,200 @@ async function gerarDepositoPIX(valor) {
   }
 }
 
+// ==========================================
+// ROTAS
+// ==========================================
+
 // Rota principal
 app.get("/", (req, res) => {
-  res.send("Backend online! Sistema de PIX funcionando.");
+  res.send("Backend online! Sistema de PIX funcionando. Acesse /teste para testar.");
+});
+
+// Rota GET para página de teste
+app.get("/teste", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Teste PIX</title>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          max-width: 400px;
+          margin: 50px auto;
+          padding: 20px;
+          background: #f0f0f0;
+        }
+        .container {
+          background: white;
+          padding: 30px;
+          border-radius: 10px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+          text-align: center;
+          color: #333;
+        }
+        input {
+          width: 100%;
+          padding: 10px;
+          margin: 10px 0;
+          border: 1px solid #ddd;
+          border-radius: 5px;
+          font-size: 16px;
+          box-sizing: border-box;
+        }
+        button {
+          width: 100%;
+          padding: 12px;
+          background: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          font-size: 16px;
+          cursor: pointer;
+          font-weight: bold;
+        }
+        button:hover {
+          background: #45a049;
+        }
+        button:disabled {
+          background: #ccc;
+          cursor: not-allowed;
+        }
+        #resultado {
+          margin-top: 20px;
+          padding: 15px;
+          border-radius: 5px;
+          display: none;
+          word-break: break-all;
+        }
+        .sucesso {
+          background: #d4edda;
+          border: 1px solid #c3e6cb;
+          color: #155724;
+        }
+        .erro {
+          background: #f8d7da;
+          border: 1px solid #f5c6cb;
+          color: #721c24;
+        }
+        #loading {
+          display: none;
+          text-align: center;
+          margin: 20px 0;
+          color: #666;
+        }
+        textarea {
+          width: 100%;
+          height: 100px;
+          padding: 10px;
+          border: 1px solid #ddd;
+          border-radius: 5px;
+          font-size: 12px;
+          box-sizing: border-box;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>💰 Gerar PIX</h2>
+        
+        <label>Valor (R$):</label>
+        <input type="number" id="valor" placeholder="100" min="20" value="100">
+        
+        <label>Produto:</label>
+        <input type="text" id="produto" placeholder="Nome do produto" value="Produto Teste">
+        
+        <label>Cliente:</label>
+        <input type="text" id="cliente" placeholder="Nome do cliente" value="Cliente Teste">
+        
+        <button id="btnGerar" onclick="gerarPix()">Gerar PIX</button>
+        
+        <div id="loading">
+          <p>⏳ Gerando PIX...</p>
+          <p><small>Isso pode levar 30-60 segundos</small></p>
+        </div>
+        
+        <div id="resultado"></div>
+      </div>
+      
+      <script>
+        async function gerarPix() {
+          const valor = document.getElementById('valor').value;
+          const produto = document.getElementById('produto').value;
+          const cliente = document.getElementById('cliente').value;
+          
+          if (!valor || valor < 20) {
+            alert('Valor mínimo é R$ 20');
+            return;
+          }
+          
+          const btn = document.getElementById('btnGerar');
+          const loading = document.getElementById('loading');
+          const resultado = document.getElementById('resultado');
+          
+          btn.disabled = true;
+          loading.style.display = 'block';
+          resultado.style.display = 'none';
+          
+          try {
+            const response = await fetch('/deposito', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                valor: parseFloat(valor),
+                produto: produto,
+                cliente: cliente
+              })
+            });
+            
+            const data = await response.json();
+            
+            loading.style.display = 'none';
+            resultado.style.display = 'block';
+            
+            if (data.status === 'ok') {
+              resultado.className = 'sucesso';
+              resultado.innerHTML = \`
+                <h3>✅ PIX Gerado!</h3>
+                <p><strong>Valor:</strong> R$ \${valor}</p>
+                <p><strong>Código PIX:</strong></p>
+                <textarea readonly>\${data.pix_code}</textarea>
+                <button onclick="copiarPix()" style="margin-top:10px;">📋 Copiar Código</button>
+              \`;
+            } else {
+              resultado.className = 'erro';
+              resultado.innerHTML = \`
+                <h3>❌ Erro</h3>
+                <p>\${data.message || 'Erro desconhecido'}</p>
+              \`;
+            }
+          } catch (error) {
+            loading.style.display = 'none';
+            resultado.style.display = 'block';
+            resultado.className = 'erro';
+            resultado.innerHTML = \`
+              <h3>❌ Erro de Conexão</h3>
+              <p>\${error.message}</p>
+            \`;
+          } finally {
+            btn.disabled = false;
+          }
+        }
+        
+        function copiarPix() {
+          const textarea = document.querySelector('textarea');
+          textarea.select();
+          document.execCommand('copy');
+          alert('Código copiado!');
+        }
+      </script>
+    </body>
+    </html>
+  `);
 });
 
 // Health Check
@@ -704,8 +857,9 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`💰 Página de teste: http://localhost:${PORT}/teste`);
   console.log(`🔍 Debug screenshots: http://localhost:${PORT}/debug-screenshots`);
-  console.log(`\n⚠️  IMPORTANTE: Configure as credenciais da plataforma no Railway:`);
-  console.log(`    PLATFORM_EMAIL = seu_email_da_plataforma`);
-  console.log(`    PLATFORM_PASSWORD = sua_senha_da_plataforma`);
+  console.log(`\n⚠️  Configurações:`);
+  console.log(`    PLATFORM_EMAIL: ${CONFIG.PLATFORM_EMAIL ? '✅ Configurado' : '❌ Não configurado'}`);
+  console.log(`    PLATFORM_PASSWORD: ${CONFIG.PLATFORM_PASSWORD ? '✅ Configurado' : '❌ Não configurado'}`);
 });
