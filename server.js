@@ -32,8 +32,8 @@ const CONFIG = {
   LOGIN_URL: 'https://y1c7m5s.com/main/entrar',
   HOME_URL: 'https://y1c7m5s.com/main/inicio',
   DEPOSIT_URL: 'https://y1c7m5s.com/main/deposito',
-  HEADLESS: true,
-  TIMEOUT: 60000,
+  HEADLESS: false,
+  TIMEOUT: 120000,
   PLATFORM_EMAIL: process.env.PLATFORM_EMAIL || "",
   PLATFORM_PASSWORD: process.env.PLATFORM_PASSWORD || "",
   PROXY_SERVER: process.env.PROXY_SERVER || ""
@@ -53,133 +53,6 @@ async function saveScreenshot(page, name) {
   }
 }
 
-// =============================================
-// FUNÇÃO INTELIGENTE PARA BLOQUEAR ANÚNCIOS
-// =============================================
-
-// Lista de padrões de URLs de anúncios para bloquear
-const AD_PATTERNS = [
-  'doubleclick',
-  'googlesyndication',
-  'googleadservices',
-  'adservice',
-  'advertising',
-  'adsense',
-  'adnxs',
-  'taboola',
-  'outbrain',
-  'popads',
-  'popcash',
-  'adsterra',
-  'exoclick',
-  'juicyads',
-  'propellerads',
-  'monetag',
-  'adnetwork',
-  'banner',
-  'popup',
-  'modal',
-  'overlay'
-];
-
-// Função para interceptar e bloquear requisições de anúncios
-async function setupAdBlocker(page) {
-  console.log('🛡️ Configurando bloqueador de anúncios...');
-  
-  // Bloquear requisições de URLs de anúncios
-  await page.route('**/*', async (route) => {
-    const url = route.request().url().toLowerCase();
-    
-    // Verificar se a URL corresponde a padrões de anúncio
-    if (AD_PATTERNS.some(pattern => url.includes(pattern))) {
-      await route.abort();
-      return;
-    }
-    
-    // Bloquear scripts de popup
-    if (url.includes('pop') || url.includes('modal') || url.includes('dialog')) {
-      await route.abort();
-      return;
-    }
-    
-    // Continuar com requisições normais
-    await route.continue();
-  });
-  
-  // Injetar CSS para esconder elementos de anúncio
-  await page.addStyleTag({
-    content: `
-      /* Esconder overlays, modais e popups */
-      [class*="overlay"],
-      [class*="modal"],
-      [class*="popup"],
-      [class*="dialog"],
-      [class*="advert"],
-      [class*="banner"],
-      [id*="overlay"],
-      [id*="modal"],
-      [id*="popup"],
-      [id*="advert"],
-      [id*="banner"] {
-        display: none !important;
-        visibility: hidden !important;
-        pointer-events: none !important;
-      }
-      
-      /* Esconder iframes de anúncio */
-      iframe[src*="ad"],
-      iframe[src*="pop"],
-      iframe[src*="banner"] {
-        display: none !important;
-      }
-    `
-  });
-  
-  // Injetar script para remover anúncios do DOM
-  await page.addInitScript(() => {
-    // Função para remover elementos de anúncio
-    function removeAds() {
-      const selectors = [
-        '[class*="overlay"]',
-        '[class*="modal"]',
-        '[class*="popup"]',
-        '[class*="dialog"]',
-        '[class*="advert"]',
-        '[class*="banner"]',
-        '[id*="overlay"]',
-        '[id*="modal"]',
-        '[id*="popup"]',
-        '[id*="advert"]',
-        '[id*="banner"]',
-        'iframe[src*="ad"]',
-        'iframe[src*="pop"]'
-      ];
-      
-      selectors.forEach(selector => {
-        document.querySelectorAll(selector).forEach(el => {
-          el.remove();
-        });
-      });
-    }
-    
-    // Executar ao carregar
-    window.addEventListener('DOMContentLoaded', removeAds);
-    window.addEventListener('load', removeAds);
-    
-    // Executar periodicamente para pegar anúncios que aparecem depois
-    setInterval(removeAds, 1000);
-    
-    // Interceptar criação de modais
-    const observer = new MutationObserver(() => {
-      removeAds();
-    });
-    
-    observer.observe(document.body, { childList: true, subtree: true });
-  });
-  
-  console.log('✅ Bloqueador de anúncios configurado!');
-}
-
 // Função para inicializar browser
 async function initBrowser() {
   if (state.browser) {
@@ -197,7 +70,8 @@ async function initBrowser() {
       '--window-size=1920,1080',
       '--disable-popup-blocking',
       '--disable-notifications',
-      '--disable-extensions'
+      '--disable-extensions',
+      '--disable-blink-features=AutomationControlled'
     ]
   };
   
@@ -219,22 +93,18 @@ async function initBrowser() {
   });
   
   state.page = await state.context.newPage();
-  
-  // Configurar bloqueador de anúncios
-  await setupAdBlocker(state.page);
-  
   return state.page;
 }
 
-// Função para fechar anúncios (caso ainda apareçam)
+// Função para fechar anúncios
 async function fecharAnuncio() {
-  console.log('🔧 Verificando se há anúncios para fechar...');
+  console.log('🔧 Tentando fechar anúncio...');
   
   try {
     const page = state.page;
     
+    // Método 1: Procurar X visível
     const fechado = await page.evaluate(() => {
-      // Procurar X visível
       const allElements = document.querySelectorAll('*');
       for (const el of allElements) {
         const text = (el.innerText || el.textContent || '').trim();
@@ -252,7 +122,41 @@ async function fecharAnuncio() {
       return { success: true };
     }
     
-    // Se não achou, tentar ESC
+    // Método 2: Cliques em grade na parte inferior
+    const viewport = page.viewportSize();
+    const startY = Math.floor(viewport.height * 0.5);
+    const endY = viewport.height - 20;
+    const stepY = 40;
+    const stepX = 80;
+    
+    for (let y = startY; y <= endY; y += stepY) {
+      for (let x = 50; x < viewport.width; x += stepX) {
+        try {
+          await page.mouse.click(x, y);
+          await page.waitForTimeout(300);
+          
+          const aindaExiste = await page.evaluate(() => {
+            const allElements = document.querySelectorAll('*');
+            for (const el of allElements) {
+              const text = (el.innerText || el.textContent || '').trim();
+              if ((text === 'X' || text === '✕' || text === '✖') && el.offsetParent !== null) {
+                return true;
+              }
+            }
+            return false;
+          });
+          
+          if (!aindaExiste) {
+            console.log('✅ Anúncio fechado por clique em grade');
+            return { success: true };
+          }
+        } catch (error) {
+          continue;
+        }
+      }
+    }
+    
+    // Método 3: ESC
     await page.keyboard.press('Escape');
     await page.waitForTimeout(1000);
     
@@ -470,7 +374,7 @@ async function selecionarPIX() {
       await saveScreenshot(page, '6_pix_selecionado');
       console.log('✅ PIX selecionado');
     } else {
-      console.log('⚠️ Botão PIX não encontrado, verificando se já está selecionado');
+      console.log('⚠️ Botão PIX não encontrado');
       await saveScreenshot(page, '6_sem_botao_pix');
     }
     
@@ -686,37 +590,31 @@ async function gerarDepositoPIX(valor) {
   try {
     await initBrowser();
     
-    // 1. Fazer login
     const loginResult = await fazerLogin(CONFIG.PLATFORM_EMAIL, CONFIG.PLATFORM_PASSWORD);
     if (!loginResult.success) {
       return loginResult;
     }
     
-    // 2. Navegar para depósito
     const navResult = await navegarParaDeposito();
     if (!navResult.success) {
       return navResult;
     }
     
-    // 3. Selecionar PIX
     const pixResult = await selecionarPIX();
     if (!pixResult.success) {
       return pixResult;
     }
     
-    // 4. Preencher valor
     const valorResult = await preencherValor(valor);
     if (!valorResult.success) {
       return valorResult;
     }
     
-    // 5. Gerar PIX
     const gerarResult = await gerarPIX();
     if (!gerarResult.success) {
       return gerarResult;
     }
     
-    // 6. Extrair código
     const codigoResult = await extrairCodigoPIX();
     if (codigoResult.success) {
       return {
@@ -734,6 +632,58 @@ async function gerarDepositoPIX(valor) {
     return { success: false, error: error.message };
   }
 }
+
+// ==========================================
+// ROTA DE CAPTURA (PARA DESCOBRIR AS APIs)
+// ==========================================
+
+app.get("/capture", async (req, res) => {
+  console.log('📡 Iniciando modo de captura...');
+  
+  try {
+    await initBrowser();
+    
+    const page = state.page;
+    
+    // Registrar todas as requisições de rede
+    page.on('request', (request) => {
+      console.log('📤 REQUEST:', request.method(), request.url());
+      if (request.postData()) {
+        console.log('   Body:', request.postData());
+      }
+    });
+    
+    page.on('response', async (response) => {
+      console.log('📥 RESPONSE:', response.status(), response.url());
+      try {
+        const contentType = response.headers()['content-type'] || '';
+        if (contentType.includes('json')) {
+          const data = await response.json();
+          console.log('   Data:', JSON.stringify(data).substring(0, 1000));
+        }
+      } catch (error) {
+        // Ignorar respostas não-JSON
+      }
+    });
+    
+    // Abrir o site
+    await page.goto(CONFIG.LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
+    
+    console.log('👆 Agora faça login manualmente no navegador que abriu.');
+    console.log('   Depois de logado, acesse a página de depósito.');
+    console.log('   Gere um PIX de teste.');
+    console.log('   Todas as chamadas de API aparecerão aqui no console.');
+    
+    // Manter a página aberta por 3 minutos
+    await page.waitForTimeout(180000);
+    
+    res.json({ status: "ok", message: "Captura concluída! Veja o console." });
+    
+  } catch (error) {
+    console.error('❌ Erro na captura:', error.message);
+    res.status(500).json({ status: "erro", message: error.message });
+  }
+});
 
 // ==========================================
 // ROTAS
@@ -874,6 +824,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`💰 Página de teste: http://localhost:${PORT}/teste`);
+  console.log(`📡 Captura de APIs: http://localhost:${PORT}/capture`);
   console.log(`📊 Configurações:`);
   console.log(`    PLATFORM_EMAIL: ${CONFIG.PLATFORM_EMAIL ? '✅ Configurado' : '❌ Não configurado'}`);
   console.log(`    PLATFORM_PASSWORD: ${CONFIG.PLATFORM_PASSWORD ? '✅ Configurado' : '❌ Não configurado'}`);
