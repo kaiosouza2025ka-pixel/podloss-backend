@@ -171,7 +171,6 @@ async function fazerLogin(email, senha) {
     await page.waitForTimeout(3000);
     await saveScreenshot(page, '1_login_page');
     
-    // Fechar anúncio se existir
     await fecharAnuncio();
     await page.waitForTimeout(1000);
     
@@ -308,7 +307,6 @@ async function navegarParaDeposito() {
     await page.waitForTimeout(5000);
     await saveScreenshot(page, '4_pagina_deposito');
     
-    // Fechar anúncio se existir
     await fecharAnuncio();
     await page.waitForTimeout(2000);
     await saveScreenshot(page, '4b_pos_anuncio');
@@ -379,58 +377,49 @@ async function selecionarPIX() {
   }
 }
 
-// Função para preencher valor
+// Função para preencher valor - ATUALIZADA COM ID IÔNICO
 async function preencherValor(valor) {
   console.log(`💵 Preenchendo valor: R$ ${valor}`);
   
   try {
     const page = state.page;
     
-    // Fechar anúncio se existir
     await fecharAnuncio();
     await page.waitForTimeout(1000);
     
     const valorPreenchido = await page.evaluate((valor) => {
-      const inputs = document.querySelectorAll('input');
-      
-      for (const input of inputs) {
-        if (input.offsetParent !== null && input.type !== 'hidden') {
-          const placeholder = input.placeholder || '';
-          const name = input.name || '';
-          const type = input.type || '';
-          const id = input.id || '';
-          
-          if (
-            type === 'number' || 
-            type === 'text' || 
-            type === 'tel' ||
-            placeholder.toLowerCase().includes('valor') || 
-            placeholder.toLowerCase().includes('value') || 
-            placeholder.toLowerCase().includes('depósito') ||
-            placeholder.toLowerCase().includes('deposito') ||
-            placeholder.toLowerCase().includes('r$') ||
-            placeholder.includes('$') ||
-            name.toLowerCase().includes('valor') || 
-            name.toLowerCase().includes('value') || 
-            name.toLowerCase().includes('amount') ||
-            name.toLowerCase().includes('deposit') ||
-            id.toLowerCase().includes('valor') || 
-            id.toLowerCase().includes('value') || 
-            id.toLowerCase().includes('amount')
-          ) {
-            input.value = valor;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
-          }
-        }
+      // Método 1: Procurar pelo id ion-input-0
+      const ionInput = document.getElementById('ion-input-0');
+      if (ionInput) {
+        ionInput.value = valor;
+        ionInput.dispatchEvent(new Event('input', { bubbles: true }));
+        ionInput.dispatchEvent(new Event('change', { bubbles: true }));
+        ionInput.dispatchEvent(new Event('ionInput', { bubbles: true }));
+        ionInput.dispatchEvent(new Event('ionChange', { bubbles: true }));
+        return true;
       }
       
+      // Método 2: Procurar input com placeholder 10 - 50.000
+      const inputs = document.querySelectorAll('input');
       for (const input of inputs) {
-        if (input.offsetParent !== null && input.type !== 'hidden') {
+        if (input.placeholder && input.placeholder.includes('50.000')) {
           input.value = valor;
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.dispatchEvent(new Event('change', { bubbles: true }));
+          input.dispatchEvent(new Event('ionInput', { bubbles: true }));
+          input.dispatchEvent(new Event('ionChange', { bubbles: true }));
+          return true;
+        }
+      }
+      
+      // Método 3: Primeiro input type=number visível
+      for (const input of inputs) {
+        if (input.type === 'number' && input.offsetParent !== null) {
+          input.value = valor;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          input.dispatchEvent(new Event('ionInput', { bubbles: true }));
+          input.dispatchEvent(new Event('ionChange', { bubbles: true }));
           return true;
         }
       }
@@ -444,7 +433,7 @@ async function preencherValor(valor) {
       return { success: false, error: 'Campo de valor não encontrado' };
     }
     
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
     await saveScreenshot(page, '7_valor_preenchido');
     console.log('✅ Valor preenchido');
     return { success: true };
