@@ -53,6 +53,133 @@ async function saveScreenshot(page, name) {
   }
 }
 
+// =============================================
+// FUNÇÃO INTELIGENTE PARA BLOQUEAR ANÚNCIOS
+// =============================================
+
+// Lista de padrões de URLs de anúncios para bloquear
+const AD_PATTERNS = [
+  'doubleclick',
+  'googlesyndication',
+  'googleadservices',
+  'adservice',
+  'advertising',
+  'adsense',
+  'adnxs',
+  'taboola',
+  'outbrain',
+  'popads',
+  'popcash',
+  'adsterra',
+  'exoclick',
+  'juicyads',
+  'propellerads',
+  'monetag',
+  'adnetwork',
+  'banner',
+  'popup',
+  'modal',
+  'overlay'
+];
+
+// Função para interceptar e bloquear requisições de anúncios
+async function setupAdBlocker(page) {
+  console.log('🛡️ Configurando bloqueador de anúncios...');
+  
+  // Bloquear requisições de URLs de anúncios
+  await page.route('**/*', async (route) => {
+    const url = route.request().url().toLowerCase();
+    
+    // Verificar se a URL corresponde a padrões de anúncio
+    if (AD_PATTERNS.some(pattern => url.includes(pattern))) {
+      await route.abort();
+      return;
+    }
+    
+    // Bloquear scripts de popup
+    if (url.includes('pop') || url.includes('modal') || url.includes('dialog')) {
+      await route.abort();
+      return;
+    }
+    
+    // Continuar com requisições normais
+    await route.continue();
+  });
+  
+  // Injetar CSS para esconder elementos de anúncio
+  await page.addStyleTag({
+    content: `
+      /* Esconder overlays, modais e popups */
+      [class*="overlay"],
+      [class*="modal"],
+      [class*="popup"],
+      [class*="dialog"],
+      [class*="advert"],
+      [class*="banner"],
+      [id*="overlay"],
+      [id*="modal"],
+      [id*="popup"],
+      [id*="advert"],
+      [id*="banner"] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+      
+      /* Esconder iframes de anúncio */
+      iframe[src*="ad"],
+      iframe[src*="pop"],
+      iframe[src*="banner"] {
+        display: none !important;
+      }
+    `
+  });
+  
+  // Injetar script para remover anúncios do DOM
+  await page.addInitScript(() => {
+    // Função para remover elementos de anúncio
+    function removeAds() {
+      const selectors = [
+        '[class*="overlay"]',
+        '[class*="modal"]',
+        '[class*="popup"]',
+        '[class*="dialog"]',
+        '[class*="advert"]',
+        '[class*="banner"]',
+        '[id*="overlay"]',
+        '[id*="modal"]',
+        '[id*="popup"]',
+        '[id*="advert"]',
+        '[id*="banner"]',
+        'iframe[src*="ad"]',
+        'iframe[src*="pop"]'
+      ];
+      
+      selectors.forEach(selector => {
+        document.querySelectorAll(selector).forEach(el => {
+          el.remove();
+        });
+      });
+    }
+    
+    // Executar ao carregar
+    window.addEventListener('DOMContentLoaded', removeAds);
+    window.addEventListener('load', removeAds);
+    
+    // Executar periodicamente para pegar anúncios que aparecem depois
+    setInterval(removeAds, 1000);
+    
+    // Interceptar criação de modais
+    const observer = new MutationObserver(() => {
+      removeAds();
+    });
+    
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+  
+  console.log('✅ Bloqueador de anúncios configurado!');
+}
+
 // Função para inicializar browser
 async function initBrowser() {
   if (state.browser) {
@@ -67,7 +194,10 @@ async function initBrowser() {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--window-size=1920,1080'
+      '--window-size=1920,1080',
+      '--disable-popup-blocking',
+      '--disable-notifications',
+      '--disable-extensions'
     ]
   };
   
@@ -89,101 +219,43 @@ async function initBrowser() {
   });
   
   state.page = await state.context.newPage();
+  
+  // Configurar bloqueador de anúncios
+  await setupAdBlocker(state.page);
+  
   return state.page;
 }
 
-// Função para fechar anúncios ou pop-ups (versão agressiva)
+// Função para fechar anúncios (caso ainda apareçam)
 async function fecharAnuncio() {
-  console.log('🔧 Tentando fechar anúncio se existir...');
+  console.log('🔧 Verificando se há anúncios para fechar...');
   
   try {
     const page = state.page;
     
-    // Método 1: Procurar por elementos X visíveis
     const fechado = await page.evaluate(() => {
+      // Procurar X visível
       const allElements = document.querySelectorAll('*');
-      
       for (const el of allElements) {
-        const text = el.innerText || el.textContent || '';
-        const trimmed = text.trim();
-        
-        // Verificar se é um X simples
-        if (trimmed === 'X' || trimmed === 'x' || trimmed === '✕' || trimmed === '✖' || trimmed === '×') {
-          if (el.offsetParent !== null) {
-            el.click();
-            return true;
-          }
-        }
-        
-        // Verificar classes comuns de botão fechar
-        const className = el.className || '';
-        if (typeof className === 'string') {
-          const cls = className.toLowerCase();
-          if (cls.includes('close') || cls.includes('dismiss') || cls.includes('x-btn')) {
-            if (el.offsetParent !== null) {
-              el.click();
-              return true;
-            }
-          }
+        const text = (el.innerText || el.textContent || '').trim();
+        if ((text === 'X' || text === 'x' || text === '✕' || text === '✖' || text === '×') && el.offsetParent !== null) {
+          el.click();
+          return true;
         }
       }
-      
       return false;
     });
     
     if (fechado) {
       await page.waitForTimeout(2000);
-      await saveScreenshot(page, 'anuncio_fechado');
-      console.log('✅ Anúncio fechado pelo método 1');
+      console.log('✅ Anúncio fechado');
       return { success: true };
     }
     
-    // Método 2: Clicar em posições específicas (embaixo do modal)
-    console.log('⚠️ Tentando clicar em posições específicas...');
-    const viewport = page.viewportSize();
-    const positions = [
-      [viewport.width / 2, viewport.height - 50],  // Centro inferior
-      [viewport.width / 2, viewport.height - 100], // Centro inferior mais acima
-      [viewport.width / 2, viewport.height / 2],   // Centro da tela
-      [viewport.width - 50, 50],                   // Canto superior direito
-      [viewport.width - 50, viewport.height - 50]  // Canto inferior direito
-    ];
+    // Se não achou, tentar ESC
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(1000);
     
-    for (const [x, y] of positions) {
-      try {
-        await page.mouse.click(x, y);
-        await page.waitForTimeout(1500);
-        
-        // Verificar se o anúncio fechou
-        const aindaExiste = await page.evaluate(() => {
-          const allElements = document.querySelectorAll('*');
-          for (const el of allElements) {
-            const text = el.innerText || el.textContent || '';
-            if (text.trim() === 'X' || text.trim() === '✕' || text.trim() === '✖') {
-              if (el.offsetParent !== null) return true;
-            }
-          }
-          return false;
-        });
-        
-        if (!aindaExiste) {
-          console.log('✅ Anúncio fechado pelo método 2 (clique em coordenadas)');
-          await saveScreenshot(page, 'anuncio_fechado_coordenadas');
-          return { success: true };
-        }
-      } catch (error) {
-        continue;
-      }
-    }
-    
-    // Método 3: Pressionar Escape várias vezes
-    console.log('⚠️ Pressionando Escape...');
-    for (let i = 0; i < 3; i++) {
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(1000);
-    }
-    
-    await saveScreenshot(page, 'apos_tentativas_fechar');
     return { success: true };
     
   } catch (error) {
@@ -203,7 +275,6 @@ async function fazerLogin(email, senha) {
     await page.waitForTimeout(5000);
     await saveScreenshot(page, '1_login_page');
     
-    // Fechar anúncio se existir
     await fecharAnuncio();
     await page.waitForTimeout(2000);
     await saveScreenshot(page, '1b_apos_fechar_anuncio');
