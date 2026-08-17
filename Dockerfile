@@ -1,12 +1,12 @@
-FROM mcr.microsoft.com/playwright:v1.40.0-focal 
- 
-WORKDIR /app 
- 
-COPY package*.json ./ 
-RUN npm install 
- 
-COPY . . 
- 
-EXPOSE 3000 
- 
-CMD ["node", "server.js"] 
+FROM mcr.microsoft.com/playwright:v1.62.1-focal
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]
