@@ -92,49 +92,38 @@ async function initBrowser() {
   return state.page;
 }
 
-// Função para fechar anúncios ou pop-ups
+// Função para fechar anúncios ou pop-ups (versão agressiva)
 async function fecharAnuncio() {
   console.log('🔧 Tentando fechar anúncio se existir...');
   
   try {
     const page = state.page;
     
+    // Método 1: Procurar por elementos X visíveis
     const fechado = await page.evaluate(() => {
-      const closeSelectors = [
-        'button[aria-label*="Fechar" i]',
-        'button[aria-label*="Close" i]',
-        'button[aria-label*="X"]',
-        'button:has-text("Fechar")',
-        'button:has-text("Close")',
-        'button:has-text("X")',
-        'button[class*="close" i]',
-        'button[class*="modal" i]',
-        'button[class*="popup" i]',
-        'a[class*="close" i]',
-        'div[class*="close" i]',
-        'span[class*="close" i]',
-        'ion-button:has-text("Fechar")',
-        'ion-button:has-text("Close")',
-        'ion-button:has-text("X")'
-      ];
+      const allElements = document.querySelectorAll('*');
       
-      for (const selector of closeSelectors) {
-        const elements = document.querySelectorAll(selector);
-        for (const el of elements) {
+      for (const el of allElements) {
+        const text = el.innerText || el.textContent || '';
+        const trimmed = text.trim();
+        
+        // Verificar se é um X simples
+        if (trimmed === 'X' || trimmed === 'x' || trimmed === '✕' || trimmed === '✖' || trimmed === '×') {
           if (el.offsetParent !== null) {
             el.click();
             return true;
           }
         }
-      }
-      
-      const overlays = document.querySelectorAll('[class*="overlay" i], [class*="modal" i], [class*="popup" i]');
-      for (const overlay of overlays) {
-        if (overlay.offsetParent !== null) {
-          const closeBtn = overlay.querySelector('button, a, span');
-          if (closeBtn) {
-            closeBtn.click();
-            return true;
+        
+        // Verificar classes comuns de botão fechar
+        const className = el.className || '';
+        if (typeof className === 'string') {
+          const cls = className.toLowerCase();
+          if (cls.includes('close') || cls.includes('dismiss') || cls.includes('x-btn')) {
+            if (el.offsetParent !== null) {
+              el.click();
+              return true;
+            }
           }
         }
       }
@@ -145,13 +134,56 @@ async function fecharAnuncio() {
     if (fechado) {
       await page.waitForTimeout(2000);
       await saveScreenshot(page, 'anuncio_fechado');
-      console.log('✅ Anúncio fechado');
-    } else {
-      console.log('⚠️ Nenhum botão de fechar encontrado, pressionando Escape...');
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(2000);
+      console.log('✅ Anúncio fechado pelo método 1');
+      return { success: true };
     }
     
+    // Método 2: Clicar em posições específicas (embaixo do modal)
+    console.log('⚠️ Tentando clicar em posições específicas...');
+    const viewport = page.viewportSize();
+    const positions = [
+      [viewport.width / 2, viewport.height - 50],  // Centro inferior
+      [viewport.width / 2, viewport.height - 100], // Centro inferior mais acima
+      [viewport.width / 2, viewport.height / 2],   // Centro da tela
+      [viewport.width - 50, 50],                   // Canto superior direito
+      [viewport.width - 50, viewport.height - 50]  // Canto inferior direito
+    ];
+    
+    for (const [x, y] of positions) {
+      try {
+        await page.mouse.click(x, y);
+        await page.waitForTimeout(1500);
+        
+        // Verificar se o anúncio fechou
+        const aindaExiste = await page.evaluate(() => {
+          const allElements = document.querySelectorAll('*');
+          for (const el of allElements) {
+            const text = el.innerText || el.textContent || '';
+            if (text.trim() === 'X' || text.trim() === '✕' || text.trim() === '✖') {
+              if (el.offsetParent !== null) return true;
+            }
+          }
+          return false;
+        });
+        
+        if (!aindaExiste) {
+          console.log('✅ Anúncio fechado pelo método 2 (clique em coordenadas)');
+          await saveScreenshot(page, 'anuncio_fechado_coordenadas');
+          return { success: true };
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    // Método 3: Pressionar Escape várias vezes
+    console.log('⚠️ Pressionando Escape...');
+    for (let i = 0; i < 3; i++) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(1000);
+    }
+    
+    await saveScreenshot(page, 'apos_tentativas_fechar');
     return { success: true };
     
   } catch (error) {
@@ -168,11 +200,13 @@ async function fazerLogin(email, senha) {
     const page = state.page;
     
     await page.goto(CONFIG.LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
     await saveScreenshot(page, '1_login_page');
     
+    // Fechar anúncio se existir
     await fecharAnuncio();
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
+    await saveScreenshot(page, '1b_apos_fechar_anuncio');
     
     console.log('📧 Preenchendo email...');
     
@@ -231,7 +265,7 @@ async function fazerLogin(email, senha) {
       await page.keyboard.press('Enter');
     }
     
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
     await fecharAnuncio();
     await saveScreenshot(page, '3_apos_continuar');
     
@@ -278,7 +312,7 @@ async function fazerLogin(email, senha) {
       await page.keyboard.press('Enter');
     }
     
-    await page.waitForTimeout(8000);
+    await page.waitForTimeout(10000);
     await fecharAnuncio();
     await saveScreenshot(page, '5_apos_login');
     
@@ -377,7 +411,7 @@ async function selecionarPIX() {
   }
 }
 
-// Função para preencher valor - ATUALIZADA COM ID IÔNICO
+// Função para preencher valor
 async function preencherValor(valor) {
   console.log(`💵 Preenchendo valor: R$ ${valor}`);
   
@@ -581,31 +615,37 @@ async function gerarDepositoPIX(valor) {
   try {
     await initBrowser();
     
+    // 1. Fazer login
     const loginResult = await fazerLogin(CONFIG.PLATFORM_EMAIL, CONFIG.PLATFORM_PASSWORD);
     if (!loginResult.success) {
       return loginResult;
     }
     
+    // 2. Navegar para depósito
     const navResult = await navegarParaDeposito();
     if (!navResult.success) {
       return navResult;
     }
     
+    // 3. Selecionar PIX
     const pixResult = await selecionarPIX();
     if (!pixResult.success) {
       return pixResult;
     }
     
+    // 4. Preencher valor
     const valorResult = await preencherValor(valor);
     if (!valorResult.success) {
       return valorResult;
     }
     
+    // 5. Gerar PIX
     const gerarResult = await gerarPIX();
     if (!gerarResult.success) {
       return gerarResult;
     }
     
+    // 6. Extrair código
     const codigoResult = await extrairCodigoPIX();
     if (codigoResult.success) {
       return {
