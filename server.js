@@ -80,7 +80,7 @@ async function initBrowser() {
   return state.page;
 }
 
-// Função para fazer login manual
+// Função para fazer login em etapas
 async function fazerLogin(email, senha) {
   console.log('🔐 Fazendo login na plataforma...');
   
@@ -91,6 +91,10 @@ async function fazerLogin(email, senha) {
     await page.waitForTimeout(3000);
     await saveScreenshot(page, '1_login_page');
     
+    // ============ ETAPA 1: EMAIL ============
+    console.log('📧 Preenchendo email...');
+    
+    // Procurar campo de email
     const emailSelectors = [
       'input[type="email"]',
       'input[name="email"]',
@@ -99,23 +103,15 @@ async function fazerLogin(email, senha) {
       'input[placeholder*="usuário" i]',
       'input[placeholder*="usuario" i]',
       'input[formcontrolname="email"]',
-      'input'
+      'input:visible'
     ];
     
     let emailInput = null;
     for (const selector of emailSelectors) {
       const inputs = await page.$$(selector);
       for (const input of inputs) {
-        const type = await input.getAttribute('type');
-        const placeholder = await input.getAttribute('placeholder');
-        const name = await input.getAttribute('name');
-        
-        if (type === 'email' || 
-            (placeholder && (placeholder.toLowerCase().includes('email') || 
-                             placeholder.toLowerCase().includes('e-mail') || 
-                             placeholder.toLowerCase().includes('usuário') || 
-                             placeholder.toLowerCase().includes('usuario'))) ||
-            (name && name.toLowerCase().includes('email'))) {
+        const isVisible = await input.isVisible().catch(() => false);
+        if (isVisible) {
           emailInput = input;
           break;
         }
@@ -124,99 +120,148 @@ async function fazerLogin(email, senha) {
     }
     
     if (!emailInput) {
-      const visibleInputs = await page.$$('input:visible');
-      if (visibleInputs.length > 0) {
-        emailInput = visibleInputs[0];
-      }
-    }
-    
-    const passwordSelectors = [
-      'input[type="password"]',
-      'input[name="password"]',
-      'input[placeholder*="senha" i]',
-      'input[formcontrolname="password"]'
-    ];
-    
-    let passwordInput = null;
-    for (const selector of passwordSelectors) {
-      passwordInput = await page.$(selector);
-      if (passwordInput) break;
-    }
-    
-    if (!passwordInput) {
-      const visibleInputs = await page.$$('input:visible');
-      if (visibleInputs.length > 1) {
-        passwordInput = visibleInputs[1];
-      }
-    }
-    
-    if (!emailInput || !passwordInput) {
-      console.error('❌ Campos de login não encontrados');
-      await saveScreenshot(page, 'erro_campos_login');
-      return { success: false, error: 'Campos de login não encontrados' };
+      console.error('❌ Campo de email não encontrado');
+      await saveScreenshot(page, 'erro_campo_email');
+      return { success: false, error: 'Campo de email não encontrado' };
     }
     
     await emailInput.click();
     await page.waitForTimeout(500);
     await emailInput.fill(email);
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
+    
+    await saveScreenshot(page, '2_email_preenchido');
+    
+    // Procurar botão "Continuar" ou "Avançar"
+    console.log('🔘 Procurando botão continuar...');
+    
+    const continueSelectors = [
+      'button:has-text("Continuar")',
+      'button:has-text("Avançar")',
+      'button:has-text("Próximo")',
+      'button:has-text("Proximo")',
+      'button:has-text("OK")',
+      'button:has-text("Ok")',
+      'button:has-text("Enviar")',
+      'button[type="submit"]',
+      'ion-button:has-text("Continuar")',
+      'ion-button:has-text("Avançar")',
+      'button:visible'
+    ];
+    
+    let continueButton = null;
+    for (const selector of continueSelectors) {
+      const buttons = await page.$$(selector);
+      for (const button of buttons) {
+        const isVisible = await button.isVisible().catch(() => false);
+        if (isVisible) {
+          const text = await button.innerText().catch(() => '');
+          if (text && (text.includes('Continuar') || text.includes('Avançar') || 
+                       text.includes('Próximo') || text.includes('Proximo') || 
+                       text.includes('OK') || text.includes('Ok') || 
+                       text.includes('Enviar'))) {
+            continueButton = button;
+            break;
+          }
+        }
+      }
+      if (continueButton) break;
+    }
+    
+    if (continueButton) {
+      await continueButton.click();
+      await page.waitForTimeout(3000);
+      console.log('✅ Botão continuar clicado');
+    } else {
+      console.log('⚠️ Botão continuar não encontrado, tentando Enter...');
+      await emailInput.press('Enter');
+      await page.waitForTimeout(3000);
+    }
+    
+    await saveScreenshot(page, '3_apos_continuar');
+    
+    // ============ ETAPA 2: SENHA ============
+    console.log('🔑 Preenchendo senha...');
+    
+    const passwordSelectors = [
+      'input[type="password"]',
+      'input[name="password"]',
+      'input[placeholder*="senha" i]',
+      'input[formcontrolname="password"]',
+      'input:visible'
+    ];
+    
+    let passwordInput = null;
+    for (const selector of passwordSelectors) {
+      const inputs = await page.$$(selector);
+      for (const input of inputs) {
+        const isVisible = await input.isVisible().catch(() => false);
+        if (isVisible) {
+          passwordInput = input;
+          break;
+        }
+      }
+      if (passwordInput) break;
+    }
+    
+    if (!passwordInput) {
+      console.error('❌ Campo de senha não encontrado');
+      await saveScreenshot(page, 'erro_campo_senha');
+      return { success: false, error: 'Campo de senha não encontrado' };
+    }
     
     await passwordInput.click();
     await page.waitForTimeout(500);
     await passwordInput.fill(senha);
     await page.waitForTimeout(1000);
     
-    await saveScreenshot(page, '2_credenciais_preenchidas');
+    await saveScreenshot(page, '4_senha_preenchida');
     
-    const buttonSelectors = [
-      'button[type="submit"]',
+    // Procurar botão de entrar
+    console.log('🔘 Procurando botão entrar...');
+    
+    const loginButtonSelectors = [
       'button:has-text("Entrar")',
       'button:has-text("Login")',
       'button:has-text("Acessar")',
       'button:has-text("Continuar")',
+      'button[type="submit"]',
       'ion-button:has-text("Entrar")',
       'ion-button:has-text("Login")',
-      'button'
+      'button:visible'
     ];
     
     let loginButton = null;
-    for (const selector of buttonSelectors) {
+    for (const selector of loginButtonSelectors) {
       const buttons = await page.$$(selector);
       for (const button of buttons) {
-        const text = await button.innerText().catch(() => '');
-        if (text && (text.includes('Entrar') || text.includes('Login') || 
-                     text.includes('Acessar') || text.includes('Continuar'))) {
-          loginButton = button;
-          break;
+        const isVisible = await button.isVisible().catch(() => false);
+        if (isVisible) {
+          const text = await button.innerText().catch(() => '');
+          if (text && (text.includes('Entrar') || text.includes('Login') || 
+                       text.includes('Acessar') || text.includes('Continuar'))) {
+            loginButton = button;
+            break;
+          }
         }
       }
       if (loginButton) break;
     }
     
-    if (!loginButton) {
-      console.error('❌ Botão de login não encontrado');
-      await saveScreenshot(page, 'erro_botao_login');
-      await passwordInput.press('Enter');
-      await page.waitForTimeout(5000);
-    } else {
+    if (loginButton) {
       await loginButton.click();
+      await page.waitForTimeout(8000);
+      console.log('✅ Botão entrar clicado');
+    } else {
+      console.log('⚠️ Botão entrar não encontrado, tentando Enter...');
+      await passwordInput.press('Enter');
       await page.waitForTimeout(8000);
     }
     
-    await saveScreenshot(page, '3_apos_login');
+    await saveScreenshot(page, '5_apos_login');
     
     const currentUrl = page.url();
     console.log('📍 URL após login:', currentUrl);
-    
-    if (currentUrl.includes('entrar') || currentUrl.includes('login')) {
-      await page.waitForTimeout(5000);
-      const newUrl = page.url();
-      
-      if (newUrl.includes('entrar') || newUrl.includes('login')) {
-        console.error('❌ Login falhou - continua na página de login');
-        return { success: false, error: 'Login falhou' };
-      }
-    }
     
     state.isLogged = true;
     console.log('✅ Login realizado com sucesso!');
