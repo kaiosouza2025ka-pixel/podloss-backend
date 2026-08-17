@@ -80,7 +80,7 @@ async function initBrowser() {
   return state.page;
 }
 
-// Função para fazer login em etapas
+// Função para fazer login (usando JavaScript para evitar interceptações)
 async function fazerLogin(email, senha) {
   console.log('🔐 Fazendo login na plataforma...');
   
@@ -94,170 +94,112 @@ async function fazerLogin(email, senha) {
     // ============ ETAPA 1: EMAIL ============
     console.log('📧 Preenchendo email...');
     
-    // Procurar campo de email
-    const emailSelectors = [
-      'input[type="email"]',
-      'input[name="email"]',
-      'input[placeholder*="email" i]',
-      'input[placeholder*="e-mail" i]',
-      'input[placeholder*="usuário" i]',
-      'input[placeholder*="usuario" i]',
-      'input[formcontrolname="email"]',
-      'input:visible'
-    ];
-    
-    let emailInput = null;
-    for (const selector of emailSelectors) {
-      const inputs = await page.$$(selector);
+    const emailPreenchido = await page.evaluate((email) => {
+      const inputs = document.querySelectorAll('input');
       for (const input of inputs) {
-        const isVisible = await input.isVisible().catch(() => false);
-        if (isVisible) {
-          emailInput = input;
-          break;
+        if (input.type === 'email' || 
+            input.name.toLowerCase().includes('email') || 
+            input.placeholder.toLowerCase().includes('email') || 
+            input.placeholder.toLowerCase().includes('usuário') ||
+            input.placeholder.toLowerCase().includes('usuario')) {
+          input.value = email;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
         }
       }
-      if (emailInput) break;
-    }
+      // Se não achou, usar primeiro input visível
+      for (const input of inputs) {
+        if (input.offsetParent !== null) {
+          input.value = email;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+      }
+      return false;
+    }, email);
     
-    if (!emailInput) {
+    if (!emailPreenchido) {
       console.error('❌ Campo de email não encontrado');
       await saveScreenshot(page, 'erro_campo_email');
       return { success: false, error: 'Campo de email não encontrado' };
     }
     
-    await emailInput.click();
-    await page.waitForTimeout(500);
-    await emailInput.fill(email);
-    await page.waitForTimeout(1000);
-    
+    await page.waitForTimeout(2000);
     await saveScreenshot(page, '2_email_preenchido');
     
-    // Procurar botão "Continuar" ou "Avançar"
-    console.log('🔘 Procurando botão continuar...');
-    
-    const continueSelectors = [
-      'button:has-text("Continuar")',
-      'button:has-text("Avançar")',
-      'button:has-text("Próximo")',
-      'button:has-text("Proximo")',
-      'button:has-text("OK")',
-      'button:has-text("Ok")',
-      'button:has-text("Enviar")',
-      'button[type="submit"]',
-      'ion-button:has-text("Continuar")',
-      'ion-button:has-text("Avançar")',
-      'button:visible'
-    ];
-    
-    let continueButton = null;
-    for (const selector of continueSelectors) {
-      const buttons = await page.$$(selector);
-      for (const button of buttons) {
-        const isVisible = await button.isVisible().catch(() => false);
-        if (isVisible) {
-          const text = await button.innerText().catch(() => '');
-          if (text && (text.includes('Continuar') || text.includes('Avançar') || 
-                       text.includes('Próximo') || text.includes('Proximo') || 
-                       text.includes('OK') || text.includes('Ok') || 
-                       text.includes('Enviar'))) {
-            continueButton = button;
-            break;
-          }
+    // Clicar em continuar via JavaScript
+    console.log('🔘 Clicando em continuar...');
+    const continuarClicado = await page.evaluate(() => {
+      const buttons = document.querySelectorAll('button, a, input[type="submit"], ion-button');
+      for (const btn of buttons) {
+        const text = btn.innerText || btn.value || '';
+        if (text.includes('Continuar') || text.includes('Avançar') || 
+            text.includes('Próximo') || text.includes('Proximo') || 
+            text.includes('OK') || text.includes('Ok') || 
+            text.includes('Enviar')) {
+          btn.click();
+          return true;
         }
       }
-      if (continueButton) break;
-    }
+      return false;
+    });
     
-    if (continueButton) {
-      await continueButton.click();
-      await page.waitForTimeout(3000);
-      console.log('✅ Botão continuar clicado');
-    } else {
+    if (!continuarClicado) {
       console.log('⚠️ Botão continuar não encontrado, tentando Enter...');
-      await emailInput.press('Enter');
-      await page.waitForTimeout(3000);
+      await page.keyboard.press('Enter');
     }
     
+    await page.waitForTimeout(3000);
     await saveScreenshot(page, '3_apos_continuar');
     
     // ============ ETAPA 2: SENHA ============
     console.log('🔑 Preenchendo senha...');
     
-    const passwordSelectors = [
-      'input[type="password"]',
-      'input[name="password"]',
-      'input[placeholder*="senha" i]',
-      'input[formcontrolname="password"]',
-      'input:visible'
-    ];
-    
-    let passwordInput = null;
-    for (const selector of passwordSelectors) {
-      const inputs = await page.$$(selector);
+    const senhaPreenchida = await page.evaluate((senha) => {
+      const inputs = document.querySelectorAll('input');
       for (const input of inputs) {
-        const isVisible = await input.isVisible().catch(() => false);
-        if (isVisible) {
-          passwordInput = input;
-          break;
+        if (input.type === 'password') {
+          input.value = senha;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
         }
       }
-      if (passwordInput) break;
-    }
+      return false;
+    }, senha);
     
-    if (!passwordInput) {
+    if (!senhaPreenchida) {
       console.error('❌ Campo de senha não encontrado');
       await saveScreenshot(page, 'erro_campo_senha');
       return { success: false, error: 'Campo de senha não encontrado' };
     }
     
-    await passwordInput.click();
-    await page.waitForTimeout(500);
-    await passwordInput.fill(senha);
-    await page.waitForTimeout(1000);
-    
+    await page.waitForTimeout(2000);
     await saveScreenshot(page, '4_senha_preenchida');
     
-    // Procurar botão de entrar
-    console.log('🔘 Procurando botão entrar...');
-    
-    const loginButtonSelectors = [
-      'button:has-text("Entrar")',
-      'button:has-text("Login")',
-      'button:has-text("Acessar")',
-      'button:has-text("Continuar")',
-      'button[type="submit"]',
-      'ion-button:has-text("Entrar")',
-      'ion-button:has-text("Login")',
-      'button:visible'
-    ];
-    
-    let loginButton = null;
-    for (const selector of loginButtonSelectors) {
-      const buttons = await page.$$(selector);
-      for (const button of buttons) {
-        const isVisible = await button.isVisible().catch(() => false);
-        if (isVisible) {
-          const text = await button.innerText().catch(() => '');
-          if (text && (text.includes('Entrar') || text.includes('Login') || 
-                       text.includes('Acessar') || text.includes('Continuar'))) {
-            loginButton = button;
-            break;
-          }
+    // Clicar em entrar via JavaScript
+    console.log('🔘 Clicando em entrar...');
+    const entrarClicado = await page.evaluate(() => {
+      const buttons = document.querySelectorAll('button, a, input[type="submit"], ion-button');
+      for (const btn of buttons) {
+        const text = btn.innerText || btn.value || '';
+        if (text.includes('Entrar') || text.includes('Login') || 
+            text.includes('Acessar') || text.includes('Continuar')) {
+          btn.click();
+          return true;
         }
       }
-      if (loginButton) break;
-    }
+      return false;
+    });
     
-    if (loginButton) {
-      await loginButton.click();
-      await page.waitForTimeout(8000);
-      console.log('✅ Botão entrar clicado');
-    } else {
+    if (!entrarClicado) {
       console.log('⚠️ Botão entrar não encontrado, tentando Enter...');
-      await passwordInput.press('Enter');
-      await page.waitForTimeout(8000);
+      await page.keyboard.press('Enter');
     }
     
+    await page.waitForTimeout(8000);
     await saveScreenshot(page, '5_apos_login');
     
     const currentUrl = page.url();
@@ -320,32 +262,27 @@ async function selecionarPIX() {
   try {
     const page = state.page;
     
-    const pixSelectors = [
-      'button:has-text("PIX")',
-      'button:has-text("Pix")',
-      'div:has-text("PIX")',
-      'span:has-text("PIX")',
-      'ion-button:has-text("PIX")',
-      'ion-segment-button:has-text("PIX")',
-      '[value="pix"]',
-      'img[alt*="PIX" i]',
-      'img[src*="pix" i]'
-    ];
-    
-    let pixButton = null;
-    for (const selector of pixSelectors) {
-      pixButton = await page.$(selector);
-      if (pixButton) {
-        await pixButton.click();
-        await page.waitForTimeout(3000);
-        await saveScreenshot(page, '6_pix_selecionado');
-        console.log('✅ PIX selecionado');
-        return { success: true };
+    const pixSelecionado = await page.evaluate(() => {
+      const elements = document.querySelectorAll('button, div, span, ion-button, ion-segment-button, a');
+      for (const el of elements) {
+        const text = el.innerText || el.textContent || '';
+        if (text.trim() === 'PIX' || text.trim() === 'Pix') {
+          el.click();
+          return true;
+        }
       }
+      return false;
+    });
+    
+    if (pixSelecionado) {
+      await page.waitForTimeout(3000);
+      await saveScreenshot(page, '6_pix_selecionado');
+      console.log('✅ PIX selecionado');
+    } else {
+      console.log('⚠️ Botão PIX não encontrado, verificando se já está selecionado');
+      await saveScreenshot(page, '6_sem_botao_pix');
     }
     
-    console.log('⚠️ Botão PIX não encontrado, verificando se já está selecionado');
-    await saveScreenshot(page, '6_sem_botao_pix');
     return { success: true };
     
   } catch (error) {
@@ -361,55 +298,37 @@ async function preencherValor(valor) {
   try {
     const page = state.page;
     
-    const amountSelectors = [
-      'input[type="number"]',
-      'input[name="amount"]',
-      'input[name="valor"]',
-      'input[name="value"]',
-      'input[placeholder*="valor" i]',
-      'input[placeholder*="value" i]',
-      'input[placeholder*="amount" i]',
-      'input[placeholder*="R$" i]',
-      'input[inputmode="numeric"]',
-      'ion-input input'
-    ];
-    
-    let amountInput = null;
-    for (const selector of amountSelectors) {
-      const inputs = await page.$$(selector);
+    const valorPreenchido = await page.evaluate((valor) => {
+      const inputs = document.querySelectorAll('input');
       for (const input of inputs) {
-        const placeholder = await input.getAttribute('placeholder');
-        const name = await input.getAttribute('name');
-        const type = await input.getAttribute('type');
+        const placeholder = input.placeholder || '';
+        const name = input.name || '';
+        const type = input.type || '';
         
         if (type === 'number' || 
-            (placeholder && (placeholder.toLowerCase().includes('valor') || 
-                             placeholder.toLowerCase().includes('value') || 
-                             placeholder.toLowerCase().includes('amount') || 
-                             placeholder.includes('R$'))) ||
-            (name && (name.toLowerCase().includes('valor') || 
-                      name.toLowerCase().includes('value') || 
-                      name.toLowerCase().includes('amount')))) {
-          amountInput = input;
-          break;
+            placeholder.toLowerCase().includes('valor') || 
+            placeholder.toLowerCase().includes('value') || 
+            placeholder.toLowerCase().includes('amount') || 
+            placeholder.includes('R$') ||
+            name.toLowerCase().includes('valor') || 
+            name.toLowerCase().includes('value') || 
+            name.toLowerCase().includes('amount')) {
+          input.value = valor;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
         }
       }
-      if (amountInput) break;
-    }
+      return false;
+    }, valor.toString());
     
-    if (!amountInput) {
+    if (!valorPreenchido) {
       console.error('❌ Campo de valor não encontrado');
       await saveScreenshot(page, 'erro_campo_valor');
       return { success: false, error: 'Campo de valor não encontrado' };
     }
     
-    await amountInput.click();
-    await page.waitForTimeout(500);
-    await amountInput.fill('');
-    await page.waitForTimeout(500);
-    await amountInput.type(valor.toString());
     await page.waitForTimeout(2000);
-    
     await saveScreenshot(page, '7_valor_preenchido');
     console.log('✅ Valor preenchido');
     return { success: true };
@@ -427,33 +346,30 @@ async function gerarPIX() {
   try {
     const page = state.page;
     
-    const generateSelectors = [
-      'button:has-text("Gerar")',
-      'button:has-text("Gerar PIX")',
-      'button:has-text("Continuar")',
-      'button:has-text("Confirmar")',
-      'button:has-text("Depositar")',
-      'button[type="submit"]',
-      'ion-button:has-text("Gerar")',
-      'ion-button:has-text("Continuar")',
-      'ion-button:has-text("Confirmar")'
-    ];
-    
-    let generateButton = null;
-    for (const selector of generateSelectors) {
-      generateButton = await page.$(selector);
-      if (generateButton) {
-        await generateButton.click();
-        await page.waitForTimeout(8000);
-        await saveScreenshot(page, '8_pix_gerado');
-        console.log('✅ Botão de gerar clicado');
-        return { success: true };
+    const gerado = await page.evaluate(() => {
+      const buttons = document.querySelectorAll('button, a, input[type="submit"], ion-button');
+      for (const btn of buttons) {
+        const text = btn.innerText || btn.value || '';
+        if (text.includes('Gerar') || text.includes('Continuar') || 
+            text.includes('Confirmar') || text.includes('Depositar')) {
+          btn.click();
+          return true;
+        }
       }
+      return false;
+    });
+    
+    if (gerado) {
+      await page.waitForTimeout(8000);
+      await saveScreenshot(page, '8_pix_gerado');
+      console.log('✅ Botão de gerar clicado');
+    } else {
+      console.error('❌ Botão de gerar não encontrado');
+      await saveScreenshot(page, 'erro_botao_gerar');
+      return { success: false, error: 'Botão de gerar não encontrado' };
     }
     
-    console.error('❌ Botão de gerar não encontrado');
-    await saveScreenshot(page, 'erro_botao_gerar');
-    return { success: false, error: 'Botão de gerar não encontrado' };
+    return { success: true };
     
   } catch (error) {
     console.error('❌ Erro ao gerar PIX:', error.message);
