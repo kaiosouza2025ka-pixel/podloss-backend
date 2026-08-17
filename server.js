@@ -92,6 +92,74 @@ async function initBrowser() {
   return state.page;
 }
 
+// Função para fechar anúncios ou pop-ups
+async function fecharAnuncio() {
+  console.log('🔧 Tentando fechar anúncio se existir...');
+  
+  try {
+    const page = state.page;
+    
+    const fechado = await page.evaluate(() => {
+      const closeSelectors = [
+        'button[aria-label*="Fechar" i]',
+        'button[aria-label*="Close" i]',
+        'button[aria-label*="X"]',
+        'button:has-text("Fechar")',
+        'button:has-text("Close")',
+        'button:has-text("X")',
+        'button[class*="close" i]',
+        'button[class*="modal" i]',
+        'button[class*="popup" i]',
+        'a[class*="close" i]',
+        'div[class*="close" i]',
+        'span[class*="close" i]',
+        'ion-button:has-text("Fechar")',
+        'ion-button:has-text("Close")',
+        'ion-button:has-text("X")'
+      ];
+      
+      for (const selector of closeSelectors) {
+        const elements = document.querySelectorAll(selector);
+        for (const el of elements) {
+          if (el.offsetParent !== null) {
+            el.click();
+            return true;
+          }
+        }
+      }
+      
+      const overlays = document.querySelectorAll('[class*="overlay" i], [class*="modal" i], [class*="popup" i]');
+      for (const overlay of overlays) {
+        if (overlay.offsetParent !== null) {
+          const closeBtn = overlay.querySelector('button, a, span');
+          if (closeBtn) {
+            closeBtn.click();
+            return true;
+          }
+        }
+      }
+      
+      return false;
+    });
+    
+    if (fechado) {
+      await page.waitForTimeout(2000);
+      await saveScreenshot(page, 'anuncio_fechado');
+      console.log('✅ Anúncio fechado');
+    } else {
+      console.log('⚠️ Nenhum botão de fechar encontrado, pressionando Escape...');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(2000);
+    }
+    
+    return { success: true };
+    
+  } catch (error) {
+    console.error('❌ Erro ao fechar anúncio:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
 // Função para fazer login
 async function fazerLogin(email, senha) {
   console.log('🔐 Fazendo login na plataforma...');
@@ -102,6 +170,10 @@ async function fazerLogin(email, senha) {
     await page.goto(CONFIG.LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
     await page.waitForTimeout(3000);
     await saveScreenshot(page, '1_login_page');
+    
+    // Fechar anúncio se existir
+    await fecharAnuncio();
+    await page.waitForTimeout(1000);
     
     console.log('📧 Preenchendo email...');
     
@@ -161,6 +233,7 @@ async function fazerLogin(email, senha) {
     }
     
     await page.waitForTimeout(3000);
+    await fecharAnuncio();
     await saveScreenshot(page, '3_apos_continuar');
     
     console.log('🔑 Preenchendo senha...');
@@ -207,6 +280,7 @@ async function fazerLogin(email, senha) {
     }
     
     await page.waitForTimeout(8000);
+    await fecharAnuncio();
     await saveScreenshot(page, '5_apos_login');
     
     const currentUrl = page.url();
@@ -234,12 +308,18 @@ async function navegarParaDeposito() {
     await page.waitForTimeout(5000);
     await saveScreenshot(page, '4_pagina_deposito');
     
+    // Fechar anúncio se existir
+    await fecharAnuncio();
+    await page.waitForTimeout(2000);
+    await saveScreenshot(page, '4b_pos_anuncio');
+    
     const currentUrl = page.url();
     if (currentUrl.includes('entrar') || currentUrl.includes('login')) {
       console.log('⚠️ Precisando navegar manualmente para depósito');
       
       await page.goto(CONFIG.HOME_URL, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
       await page.waitForTimeout(3000);
+      await fecharAnuncio();
       
       const depositLinks = await page.$$('a:has-text("Depósito"), a:has-text("Deposito"), a:has-text("deposito"), a:has-text("depósito"), button:has-text("Depósito"), ion-button:has-text("Depósito")');
       
@@ -248,6 +328,7 @@ async function navegarParaDeposito() {
         if (href && href.includes('deposit')) {
           await link.click();
           await page.waitForTimeout(5000);
+          await fecharAnuncio();
           break;
         }
       }
@@ -298,17 +379,20 @@ async function selecionarPIX() {
   }
 }
 
-// Função para preencher valor - ATUALIZADA
+// Função para preencher valor
 async function preencherValor(valor) {
   console.log(`💵 Preenchendo valor: R$ ${valor}`);
   
   try {
     const page = state.page;
     
+    // Fechar anúncio se existir
+    await fecharAnuncio();
+    await page.waitForTimeout(1000);
+    
     const valorPreenchido = await page.evaluate((valor) => {
       const inputs = document.querySelectorAll('input');
       
-      // Primeiro, procurar input numérico visível
       for (const input of inputs) {
         if (input.offsetParent !== null && input.type !== 'hidden') {
           const placeholder = input.placeholder || '';
@@ -342,7 +426,6 @@ async function preencherValor(valor) {
         }
       }
       
-      // Se não achou, pegar primeiro input visível
       for (const input of inputs) {
         if (input.offsetParent !== null && input.type !== 'hidden') {
           input.value = valor;
@@ -372,7 +455,7 @@ async function preencherValor(valor) {
   }
 }
 
-// Função para gerar PIX - ATUALIZADA
+// Função para gerar PIX
 async function gerarPIX() {
   console.log('🎯 Gerando PIX...');
   
@@ -571,176 +654,68 @@ app.get("/teste", (req, res) => {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <style>
-        body {
-          font-family: Arial, sans-serif;
-          max-width: 400px;
-          margin: 50px auto;
-          padding: 20px;
-          background: #f0f0f0;
-        }
-        .container {
-          background: white;
-          padding: 30px;
-          border-radius: 10px;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h2 {
-          text-align: center;
-          color: #333;
-        }
-        input {
-          width: 100%;
-          padding: 10px;
-          margin: 10px 0;
-          border: 1px solid #ddd;
-          border-radius: 5px;
-          font-size: 16px;
-          box-sizing: border-box;
-        }
-        button {
-          width: 100%;
-          padding: 12px;
-          background: #4CAF50;
-          color: white;
-          border: none;
-          border-radius: 5px;
-          font-size: 16px;
-          cursor: pointer;
-          font-weight: bold;
-        }
-        button:hover {
-          background: #45a049;
-        }
-        button:disabled {
-          background: #ccc;
-          cursor: not-allowed;
-        }
-        #resultado {
-          margin-top: 20px;
-          padding: 15px;
-          border-radius: 5px;
-          display: none;
-          word-break: break-all;
-        }
-        .sucesso {
-          background: #d4edda;
-          border: 1px solid #c3e6cb;
-          color: #155724;
-        }
-        .erro {
-          background: #f8d7da;
-          border: 1px solid #f5c6cb;
-          color: #721c24;
-        }
-        #loading {
-          display: none;
-          text-align: center;
-          margin: 20px 0;
-          color: #666;
-        }
-        textarea {
-          width: 100%;
-          height: 100px;
-          padding: 10px;
-          border: 1px solid #ddd;
-          border-radius: 5px;
-          font-size: 12px;
-          box-sizing: border-box;
-        }
+        body { font-family: Arial; max-width: 400px; margin: 50px auto; padding: 20px; background: #f0f0f0; }
+        .container { background: white; padding: 30px; border-radius: 10px; }
+        h2 { text-align: center; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #ccc; }
+        #resultado { margin-top: 20px; padding: 15px; border-radius: 5px; display: none; word-break: break-all; }
+        .sucesso { background: #d4edda; color: #155724; }
+        .erro { background: #f8d7da; color: #721c24; }
+        #loading { display: none; text-align: center; margin: 20px 0; }
+        textarea { width: 100%; height: 100px; padding: 10px; font-size: 12px; }
       </style>
     </head>
     <body>
       <div class="container">
         <h2>💰 Gerar PIX</h2>
-        
         <label>Valor (R$):</label>
-        <input type="number" id="valor" placeholder="100" min="20" value="100">
-        
+        <input type="number" id="valor" value="100" min="20">
         <label>Produto:</label>
-        <input type="text" id="produto" placeholder="Nome do produto" value="Produto Teste">
-        
+        <input type="text" id="produto" value="Produto Teste">
         <label>Cliente:</label>
-        <input type="text" id="cliente" placeholder="Nome do cliente" value="Cliente Teste">
-        
+        <input type="text" id="cliente" value="Cliente Teste">
         <button id="btnGerar" onclick="gerarPix()">Gerar PIX</button>
-        
-        <div id="loading">
-          <p>⏳ Gerando PIX...</p>
-          <p><small>Isso pode levar 30-60 segundos</small></p>
-        </div>
-        
+        <div id="loading"><p>⏳ Gerando PIX... Aguarde 30-60 segundos</p></div>
         <div id="resultado"></div>
       </div>
-      
       <script>
         async function gerarPix() {
           const valor = document.getElementById('valor').value;
           const produto = document.getElementById('produto').value;
           const cliente = document.getElementById('cliente').value;
-          
-          if (!valor || valor < 20) {
-            alert('Valor mínimo é R$ 20');
-            return;
-          }
-          
+          if (!valor || valor < 20) { alert('Valor mínimo é R$ 20'); return; }
           const btn = document.getElementById('btnGerar');
           const loading = document.getElementById('loading');
           const resultado = document.getElementById('resultado');
-          
           btn.disabled = true;
           loading.style.display = 'block';
           resultado.style.display = 'none';
-          
           try {
             const response = await fetch('/deposito', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                valor: parseFloat(valor),
-                produto: produto,
-                cliente: cliente
-              })
+              body: JSON.stringify({ valor: parseFloat(valor), produto, cliente })
             });
-            
             const data = await response.json();
-            
             loading.style.display = 'none';
             resultado.style.display = 'block';
-            
             if (data.status === 'ok') {
               resultado.className = 'sucesso';
-              resultado.innerHTML = \`
-                <h3>✅ PIX Gerado!</h3>
-                <p><strong>Valor:</strong> R$ \${valor}</p>
-                <p><strong>Código PIX:</strong></p>
-                <textarea readonly>\${data.pix_code}</textarea>
-                <button onclick="copiarPix()" style="margin-top:10px;">📋 Copiar Código</button>
-              \`;
+              resultado.innerHTML = '<h3>✅ PIX Gerado!</h3><p><strong>Valor:</strong> R$ ' + valor + '</p><p><strong>Código PIX:</strong></p><textarea readonly>' + data.pix_code + '</textarea>';
             } else {
               resultado.className = 'erro';
-              resultado.innerHTML = \`
-                <h3>❌ Erro</h3>
-                <p>\${data.message || 'Erro desconhecido'}</p>
-              \`;
+              resultado.innerHTML = '<h3>❌ Erro</h3><p>' + (data.message || 'Erro desconhecido') + '</p>';
             }
           } catch (error) {
             loading.style.display = 'none';
             resultado.style.display = 'block';
             resultado.className = 'erro';
-            resultado.innerHTML = \`
-              <h3>❌ Erro de Conexão</h3>
-              <p>\${error.message}</p>
-            \`;
+            resultado.innerHTML = '<h3>❌ Erro de Conexão</h3><p>' + error.message + '</p>';
           } finally {
             btn.disabled = false;
           }
-        }
-        
-        function copiarPix() {
-          const textarea = document.querySelector('textarea');
-          textarea.select();
-          document.execCommand('copy');
-          alert('Código copiado!');
         }
       </script>
     </body>
@@ -750,112 +725,56 @@ app.get("/teste", (req, res) => {
 
 // Health Check
 app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "ok",
-    message: "Servidor funcionando!",
-    timestamp: new Date().toISOString()
-  });
+  res.status(200).json({ status: "ok", message: "Servidor funcionando!" });
 });
 
 // Rota para screenshots de debug
 app.get("/debug-screenshots", (req, res) => {
   try {
     const files = fs.readdirSync("screenshots");
-    const screenshots = files.map(file => ({
-      filename: file,
-      url: `/screenshots/${file}`
-    }));
-    res.json({ 
-      status: "ok", 
-      screenshots 
-    });
+    const screenshots = files.map(file => ({ filename: file, url: `/screenshots/${file}` }));
+    res.json({ status: "ok", screenshots });
   } catch (error) {
-    res.json({ 
-      status: "erro", 
-      screenshots: [], 
-      error: error.message 
-    });
+    res.json({ status: "erro", screenshots: [], error: error.message });
   }
 });
 
 // Rota para gerar PIX
 app.post("/deposito", async (req, res) => {
   try {
-    const {
-      valor,
-      produto,
-      sabor,
-      quantidade,
-      identificador,
-      cliente,
-      telefone
-    } = req.body;
-
-    console.log("💰 Nova solicitação de PIX:");
-    console.log({
-      valor,
-      produto,
-      sabor,
-      quantidade,
-      identificador,
-      cliente,
-      telefone
-    });
-
-    if (!valor) {
-      return res.status(400).json({
-        status: "erro",
-        message: "Valor é obrigatório"
-      });
-    }
-
-    if (state.processing) {
-      return res.status(429).json({
-        status: "erro",
-        message: "Sistema ocupado. Aguarde alguns segundos."
-      });
-    }
-
-    state.processing = true;
-
-    const resultado = await gerarDepositoPIX(valor);
+    const { valor, produto, cliente } = req.body;
+    console.log("💰 Nova solicitação de PIX:", { valor, produto, cliente });
     
-    state.processing = false;
-
-    if (resultado.success) {
-      return res.status(200).json({
-        status: "ok",
-        pix_code: resultado.pixCode,
-        valor: valor,
-        message: "PIX gerado com sucesso!"
-      });
-    } else {
-      return res.status(500).json({
-        status: "erro",
-        message: resultado.error || "Não foi possível gerar o PIX"
-      });
+    if (!valor) {
+      return res.status(400).json({ status: "erro", message: "Valor é obrigatório" });
     }
-
+    
+    if (state.processing) {
+      return res.status(429).json({ status: "erro", message: "Sistema ocupado" });
+    }
+    
+    state.processing = true;
+    const resultado = await gerarDepositoPIX(valor);
+    state.processing = false;
+    
+    if (resultado.success) {
+      return res.status(200).json({ status: "ok", pix_code: resultado.pixCode, valor, message: "PIX gerado!" });
+    } else {
+      return res.status(500).json({ status: "erro", message: resultado.error || "Falha ao gerar PIX" });
+    }
   } catch (error) {
     state.processing = false;
     console.error(error);
-    return res.status(500).json({
-      status: "erro",
-      message: "Erro interno do servidor."
-    });
+    return res.status(500).json({ status: "erro", message: "Erro interno" });
   }
 });
 
-// Inicialização
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`💰 Página de teste: http://localhost:${PORT}/teste`);
-  console.log(`🔍 Debug screenshots: http://localhost:${PORT}/debug-screenshots`);
-  console.log(`\n⚠️  Configurações:`);
+  console.log(`📊 Configurações:`);
   console.log(`    PLATFORM_EMAIL: ${CONFIG.PLATFORM_EMAIL ? '✅ Configurado' : '❌ Não configurado'}`);
   console.log(`    PLATFORM_PASSWORD: ${CONFIG.PLATFORM_PASSWORD ? '✅ Configurado' : '❌ Não configurado'}`);
-  console.log(`    PROXY_SERVER: ${CONFIG.PROXY_SERVER ? '✅ Configurado' : '❌ Não configurado'}`);
 });
