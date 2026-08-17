@@ -35,7 +35,8 @@ const CONFIG = {
   HEADLESS: true,
   TIMEOUT: 60000,
   PLATFORM_EMAIL: process.env.PLATFORM_EMAIL || "",
-  PLATFORM_PASSWORD: process.env.PLATFORM_PASSWORD || ""
+  PLATFORM_PASSWORD: process.env.PLATFORM_PASSWORD || "",
+  PROXY_SERVER: process.env.PROXY_SERVER || ""
 };
 
 // Função para salvar screenshot
@@ -59,7 +60,8 @@ async function initBrowser() {
     state.browser = null;
   }
   
-  state.browser = await chromium.launch({
+  // Configurar launch options
+  const launchOptions = {
     headless: CONFIG.HEADLESS,
     args: [
       '--no-sandbox',
@@ -68,7 +70,19 @@ async function initBrowser() {
       '--disable-gpu',
       '--window-size=1920,1080'
     ]
-  });
+  };
+  
+  // Adicionar proxy se configurado
+  if (CONFIG.PROXY_SERVER) {
+    launchOptions.proxy = {
+      server: `http://${CONFIG.PROXY_SERVER}`
+    };
+    console.log('🔄 Usando proxy:', CONFIG.PROXY_SERVER);
+  } else {
+    console.log('⚠️ Nenhum proxy configurado');
+  }
+  
+  state.browser = await chromium.launch(launchOptions);
   
   state.context = await state.browser.newContext({
     viewport: { width: 1920, height: 1080 },
@@ -823,4 +837,5 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n⚠️  Configurações:`);
   console.log(`    PLATFORM_EMAIL: ${CONFIG.PLATFORM_EMAIL ? '✅ Configurado' : '❌ Não configurado'}`);
   console.log(`    PLATFORM_PASSWORD: ${CONFIG.PLATFORM_PASSWORD ? '✅ Configurado' : '❌ Não configurado'}`);
+  console.log(`    PROXY_SERVER: ${CONFIG.PROXY_SERVER ? '✅ Configurado' : '❌ Não configurado'}`);
 });
