@@ -60,7 +60,6 @@ async function initBrowser() {
     state.browser = null;
   }
   
-  // Configurar launch options
   const launchOptions = {
     headless: CONFIG.HEADLESS,
     args: [
@@ -72,14 +71,13 @@ async function initBrowser() {
     ]
   };
   
-  // Adicionar proxy se configurado
   if (CONFIG.PROXY_SERVER) {
     launchOptions.proxy = {
       server: `http://${CONFIG.PROXY_SERVER}`
     };
     console.log('🔄 Usando proxy:', CONFIG.PROXY_SERVER);
   } else {
-    console.log('⚠️ Nenhum proxy configurado');
+    console.log('⚠️ Nenhum proxy configurado - usando IP local');
   }
   
   state.browser = await chromium.launch(launchOptions);
@@ -94,7 +92,7 @@ async function initBrowser() {
   return state.page;
 }
 
-// Função para fazer login (usando JavaScript para evitar interceptações)
+// Função para fazer login
 async function fazerLogin(email, senha) {
   console.log('🔐 Fazendo login na plataforma...');
   
@@ -105,7 +103,6 @@ async function fazerLogin(email, senha) {
     await page.waitForTimeout(3000);
     await saveScreenshot(page, '1_login_page');
     
-    // ============ ETAPA 1: EMAIL ============
     console.log('📧 Preenchendo email...');
     
     const emailPreenchido = await page.evaluate((email) => {
@@ -122,7 +119,6 @@ async function fazerLogin(email, senha) {
           return true;
         }
       }
-      // Se não achou, usar primeiro input visível
       for (const input of inputs) {
         if (input.offsetParent !== null) {
           input.value = email;
@@ -143,7 +139,6 @@ async function fazerLogin(email, senha) {
     await page.waitForTimeout(2000);
     await saveScreenshot(page, '2_email_preenchido');
     
-    // Clicar em continuar via JavaScript
     console.log('🔘 Clicando em continuar...');
     const continuarClicado = await page.evaluate(() => {
       const buttons = document.querySelectorAll('button, a, input[type="submit"], ion-button');
@@ -168,7 +163,6 @@ async function fazerLogin(email, senha) {
     await page.waitForTimeout(3000);
     await saveScreenshot(page, '3_apos_continuar');
     
-    // ============ ETAPA 2: SENHA ============
     console.log('🔑 Preenchendo senha...');
     
     const senhaPreenchida = await page.evaluate((senha) => {
@@ -193,7 +187,6 @@ async function fazerLogin(email, senha) {
     await page.waitForTimeout(2000);
     await saveScreenshot(page, '4_senha_preenchida');
     
-    // Clicar em entrar via JavaScript
     console.log('🔘 Clicando em entrar...');
     const entrarClicado = await page.evaluate(() => {
       const buttons = document.querySelectorAll('button, a, input[type="submit"], ion-button');
@@ -305,7 +298,7 @@ async function selecionarPIX() {
   }
 }
 
-// Função para preencher valor
+// Função para preencher valor - ATUALIZADA
 async function preencherValor(valor) {
   console.log(`💵 Preenchendo valor: R$ ${valor}`);
   
@@ -314,25 +307,51 @@ async function preencherValor(valor) {
     
     const valorPreenchido = await page.evaluate((valor) => {
       const inputs = document.querySelectorAll('input');
+      
+      // Primeiro, procurar input numérico visível
       for (const input of inputs) {
-        const placeholder = input.placeholder || '';
-        const name = input.name || '';
-        const type = input.type || '';
-        
-        if (type === 'number' || 
+        if (input.offsetParent !== null && input.type !== 'hidden') {
+          const placeholder = input.placeholder || '';
+          const name = input.name || '';
+          const type = input.type || '';
+          const id = input.id || '';
+          
+          if (
+            type === 'number' || 
+            type === 'text' || 
+            type === 'tel' ||
             placeholder.toLowerCase().includes('valor') || 
             placeholder.toLowerCase().includes('value') || 
-            placeholder.toLowerCase().includes('amount') || 
-            placeholder.includes('R$') ||
+            placeholder.toLowerCase().includes('depósito') ||
+            placeholder.toLowerCase().includes('deposito') ||
+            placeholder.toLowerCase().includes('r$') ||
+            placeholder.includes('$') ||
             name.toLowerCase().includes('valor') || 
             name.toLowerCase().includes('value') || 
-            name.toLowerCase().includes('amount')) {
+            name.toLowerCase().includes('amount') ||
+            name.toLowerCase().includes('deposit') ||
+            id.toLowerCase().includes('valor') || 
+            id.toLowerCase().includes('value') || 
+            id.toLowerCase().includes('amount')
+          ) {
+            input.value = valor;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+        }
+      }
+      
+      // Se não achou, pegar primeiro input visível
+      for (const input of inputs) {
+        if (input.offsetParent !== null && input.type !== 'hidden') {
           input.value = valor;
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.dispatchEvent(new Event('change', { bubbles: true }));
           return true;
         }
       }
+      
       return false;
     }, valor.toString());
     
@@ -353,7 +372,7 @@ async function preencherValor(valor) {
   }
 }
 
-// Função para gerar PIX
+// Função para gerar PIX - ATUALIZADA
 async function gerarPIX() {
   console.log('🎯 Gerando PIX...');
   
@@ -361,11 +380,12 @@ async function gerarPIX() {
     const page = state.page;
     
     const gerado = await page.evaluate(() => {
-      const buttons = document.querySelectorAll('button, a, input[type="submit"], ion-button');
+      const buttons = document.querySelectorAll('button, a, input[type="submit"], ion-button, div[role="button"]');
       for (const btn of buttons) {
-        const text = btn.innerText || btn.value || '';
-        if (text.includes('Gerar') || text.includes('Continuar') || 
-            text.includes('Confirmar') || text.includes('Depositar')) {
+        const text = btn.innerText || btn.value || btn.textContent || '';
+        if (text.includes('Depositar') || text.includes('Deposito') || 
+            text.includes('Gerar') || text.includes('Continuar') || 
+            text.includes('Confirmar')) {
           btn.click();
           return true;
         }
@@ -376,11 +396,11 @@ async function gerarPIX() {
     if (gerado) {
       await page.waitForTimeout(8000);
       await saveScreenshot(page, '8_pix_gerado');
-      console.log('✅ Botão de gerar clicado');
+      console.log('✅ Botão de depositar clicado');
     } else {
-      console.error('❌ Botão de gerar não encontrado');
+      console.error('❌ Botão de depositar não encontrado');
       await saveScreenshot(page, 'erro_botao_gerar');
-      return { success: false, error: 'Botão de gerar não encontrado' };
+      return { success: false, error: 'Botão de depositar não encontrado' };
     }
     
     return { success: true };
